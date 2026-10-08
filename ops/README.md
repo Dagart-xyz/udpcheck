@@ -1,6 +1,6 @@
 # Что стоит на серверах (не из этого каталога кода)
 
-Хаб (сервер в России):
+Хаб:
 - `udpcheck-backup` (/usr/local/sbin) + `udpcheck-backup.service/.timer`: ежедневно в 03:30 по Москве копия хаба по ssh на сервер копий
   (ключ /root/.ssh/backup_ed25519, только приём архива; адрес сервера копий в /etc/udpcheck/backup.env: BACKUP_DEST=пользователь@сервер).
 - `udpcheck-geo-update` + `geo.service/.timer` (в системе как udpcheck-geo.*): ежедневно в 03:00 по Москве проверка баз GeoIP DB-IP Lite.

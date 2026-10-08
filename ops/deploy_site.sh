@@ -8,6 +8,6 @@ KEY="${KEY:-}"; HUB="${HUB:-root@dagart.xyz}"          # KEY: файл ключ�
 B="$(date +%Y%m%d-%H%M%S)"
 TMP="$(mktemp)"
 sed "s/__BUILD__/$B/" site/index.html > "$TMP"
-if [ -n "$KEY" ]; then scp -q -i "$KEY" -o IdentitiesOnly=yes "$TMP" "$HUB:/var/www/udpcheck-site/index.html"; else scp -q "$TMP" "$HUB:/var/www/udpcheck-site/index.html"; fi
+if [ -n "$KEY" ]; then scp -q -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$TMP" "$HUB:/var/www/udpcheck-site/index.html"; else scp -q -o StrictHostKeyChecking=accept-new "$TMP" "$HUB:/var/www/udpcheck-site/index.html"; fi
 rm -f "$TMP"
 echo "страница выложена, версия $B"
