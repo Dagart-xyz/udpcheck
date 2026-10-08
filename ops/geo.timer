@@ -1,0 +1,8 @@
+[Unit]
+Description=udpcheck: ежедневная проверка баз GeoIP в 03:00 по Москве
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Moscow
+RandomizedDelaySec=25min
+Persistent=true
+[Install]
+WantedBy=timers.target

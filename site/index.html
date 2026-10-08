@@ -1,0 +1,1090 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UDPcheck: режет ли провайдер UDP</title>
+<meta name="description" content="Узнайте, режет ли ваш провайдер UDP из-за рубежа, и где именно обрывается маршрут: готовый текст для техподдержки.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b5fff'/%3E%3Cpath d='M6 21l6-10 5 7 3-4 6 7z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f4f6fa; --surface:#fff; --surface2:#eef1f7; --text:#111827; --muted:#5b6578; --line:#d9dfeb;
+  --accent:#0b5fff; --accent-fg:#fff;
+  --ok:#0f7a3d; --ok-bg:#e3f6ea; --bad:#b42318; --bad-bg:#fde8e6; --warn:#946200; --warn-bg:#fff3d1; --idle:#475467; --idle-bg:#eceff4;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1118; --surface:#151c27; --surface2:#1c2533; --text:#e8edf5; --muted:#9aa6b8; --line:#273244;
+    --accent:#4d8bff; --accent-fg:#06101f;
+    --ok:#52d38a; --ok-bg:#12301f; --bad:#ff8a80; --bad-bg:#3a1714; --warn:#f2c14e; --warn-bg:#3a2e0e; --idle:#aab4c5; --idle-bg:#202a39;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1118; --surface:#151c27; --surface2:#1c2533; --text:#e8edf5; --muted:#9aa6b8; --line:#273244;
+  --accent:#4d8bff; --accent-fg:#06101f;
+  --ok:#52d38a; --ok-bg:#12301f; --bad:#ff8a80; --bad-bg:#3a1714; --warn:#f2c14e; --warn-bg:#3a2e0e; --idle:#aab4c5; --idle-bg:#202a39;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:900px;margin:0 auto;padding:0 16px}
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 16px;padding:16px 0}
+.logo{font-weight:800;letter-spacing:-.02em;font-size:20px}
+.logo span{color:var(--accent)}
+nav{display:flex;flex-wrap:wrap;gap:4px 14px}
+nav a{text-decoration:none;color:var(--muted);font-size:14px}
+.hero{padding:24px 0 8px}
+h1{font-size:clamp(28px,6vw,44px);line-height:1.1;margin:0 0 14px;letter-spacing:-.025em}
+.lead{color:var(--muted);font-size:18px;max-width:640px;margin:0 0 22px}
+.cta{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+button.go{appearance:none;border:0;background:var(--accent);color:var(--accent-fg);font:inherit;font-weight:700;font-size:18px;
+  padding:16px 28px;border-radius:14px;cursor:pointer;min-height:56px;width:100%;max-width:420px;box-shadow:0 6px 20px rgba(11,95,255,.25)}
+button.go:disabled{opacity:.65;cursor:progress}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.hint{color:var(--muted);font-size:14px}
+section{padding:26px 0}
+h2{font-size:24px;letter-spacing:-.015em;margin:0 0 14px}
+h3{margin:0 0 8px;font-size:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.grid{display:grid;gap:12px}
+@media(min-width:720px){.grid.three{grid-template-columns:repeat(3,1fr)}}
+.step b{display:block;margin-bottom:4px}
+.step small{color:var(--muted)}
+#result{display:none;margin-top:22px;gap:14px}
+#result.on{display:grid}
+.badge{display:inline-block;border-radius:999px;padding:3px 12px;font-weight:700;font-size:13px}
+.v-ok{background:var(--ok-bg);color:var(--ok)}
+.v-bad{background:var(--bad-bg);color:var(--bad)}
+.v-warn{background:var(--warn-bg);color:var(--warn)}
+.v-idle{background:var(--idle-bg);color:var(--idle)}
+.answer{border-left:8px solid var(--idle);padding:18px}
+.answer.v-ok{border-color:var(--ok);background:var(--surface);color:var(--text)}
+.answer.v-bad{border-color:var(--bad);background:var(--surface);color:var(--text)}
+.answer.v-warn{border-color:var(--warn);background:var(--surface);color:var(--text)}
+.answer.v-idle{background:var(--surface);color:var(--text)}
+.answer .big{font-size:clamp(26px,6vw,36px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin:8px 0 6px}
+.answer.v-ok .big{color:var(--ok)}.answer.v-bad .big{color:var(--bad)}.answer.v-warn .big{color:var(--warn)}
+.muted{color:var(--muted)}
+.small{font-size:14px}
+.tgt{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.tgt:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.tgt h4{margin:0 0 6px;font-size:16px}
+.m{display:flex;gap:8px;align-items:flex-start;margin:6px 0;flex-wrap:wrap}
+.m .nm{min-width:210px;font-size:13px;padding-top:4px}
+.m .lbl{min-width:46px;font-family:var(--mono);font-size:13px;color:var(--muted);padding-top:4px}
+.chain{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{border-radius:8px;padding:3px 9px;font-size:13px;border:1px solid var(--line);background:var(--surface2)}
+.dead{color:var(--bad);font-size:13px;font-weight:600}
+.reach{color:var(--ok);font-size:13px;font-weight:600}
+pre.txt{margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;white-space:pre-wrap;word-break:break-word;font:14px/1.5 var(--mono)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+.bar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--surface2);min-width:90px;margin-top:6px}
+.bar i{display:block;height:100%}
+.tblwrap{overflow-x:auto}
+pre.cmd{margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;font:13px/1.5 var(--mono);white-space:pre}
+.cmdrow{margin:10px 0}
+.cmdrow .t{font-size:13px;color:var(--muted);margin-bottom:4px}
+button.copy{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:8px;padding:8px 14px;font:inherit;font-size:14px;margin-top:8px;cursor:pointer}
+ul.clean{margin:0;padding-left:20px}
+ul.clean li{margin:6px 0}
+details summary{cursor:pointer;font-weight:700;font-size:17px}
+details[open] summary{margin-bottom:12px}
+footer{padding:28px 0 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);margin-top:20px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+.err{color:var(--bad)}
+.cutline{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:3px 0}
+.cutline .k{font-size:12px;color:var(--muted);min-width:78px}
+.nodegrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-top:12px}
+.node{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface2)}
+.node b{display:block;font-size:15px;overflow-wrap:anywhere}
+.node .m2{font-size:13px;color:var(--muted)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:var(--muted)}
+.dot.on{background:var(--ok)}
+.psearch input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:inherit;margin:0 0 12px}
+.pmore{margin-top:12px}
+.pfoot.sz{color:var(--warn);font-weight:600}
+#newver{position:fixed;left:12px;right:12px;bottom:12px;z-index:50;background:var(--surface);border:1px solid var(--accent);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;box-shadow:0 4px 18px rgba(0,0,0,.25)}
+#newver[hidden]{display:none}
+.pgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.pcard{display:block;text-decoration:none;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.pcard:hover{border-color:var(--accent)}
+.pcard.st-cut{background:var(--bad-bg);border-color:var(--bad)}
+.pcard.st-partial{background:var(--warn-bg);border-color:var(--warn)}
+.phead{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.pav{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;flex:none;font-size:15px}
+.pav.logo{background:#fff;object-fit:contain;padding:4px;border:1px solid var(--line)}
+.pname{font-weight:600;font-size:15px;line-height:1.2;overflow-wrap:anywhere}
+.pst{font-size:13px;font-weight:600}
+.pst.cut{color:var(--bad)}.pst.partial{color:var(--warn)}.pst.ok{color:var(--ok)}.pst.stale,.pst.noanchor{color:var(--idle)}
+.pfoot{font-size:13px;color:var(--muted);margin-top:4px}
+svg.spark{display:block;width:100%;height:38px;color:var(--muted)}
+.pstat{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+.pstat span{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:13px}
+.seg{display:flex;gap:6px;margin:10px 0}
+.seg button{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:8px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+svg.tl{display:block;width:100%;height:64px;border-radius:8px;background:var(--surface2)}
+.tl-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px}
+.trow{margin:12px 0}
+.trow .nm{font-size:14px;font-weight:600}
+#provider{display:none}
+body.detail #provider{display:block}
+body.detail .hero,body.detail section:not(#provider){display:none}
+.back{display:inline-block;margin:6px 0 10px;font-size:14px}
+a.btn,button.btn{cursor:pointer;font-family:inherit;border:0;display:inline-block;text-decoration:none;background:var(--accent);color:var(--accent-fg);font-weight:700;padding:12px 22px;border-radius:12px;box-shadow:0 4px 14px rgba(11,95,255,.2)}
+a.btn:hover{filter:brightness(1.08)}
+a.btn.ghost,button.btn.ghost{background:var(--surface);color:var(--text);border:1px solid var(--line);box-shadow:none;font-weight:600;padding:8px 16px;margin:6px 0 10px;font-size:14px}
+a.btn.ghost:hover,button.btn.ghost:hover{border-color:var(--accent)}
+button.btn.ghost{border:1px solid var(--line)}
+.pmore{text-align:center}
+.pmore .btn.more{font-size:15px;padding:10px 28px;border-radius:999px;margin:4px 0 6px}
+.pmore .btn.more .cnt{color:var(--muted);font-weight:500;margin-left:6px}
+.logo:focus:not(:focus-visible){outline:none}
+.tag{display:inline-block;font-size:12px;font-weight:400;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin-left:8px;color:var(--muted)}
+.tag.on{color:var(--ok);border-color:var(--ok)}
+.node.off{opacity:.55}
+.agroup{margin:8px 0 12px}
+.anchors{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}
+.anchor{border:1px solid var(--line);border-radius:12px;padding:6px 12px;background:var(--surface2);font-size:14px}
+.anchor small{display:block;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="logo" href="/" id="logo" style="text-decoration:none;color:inherit">UDP<span>check</span></a>
+    <nav><a href="/#providers">Провайдеры</a><a href="/#journal">Журнал</a><a href="/#how">Кто есть кто</a><a href="/#nodes">Узлы</a><a href="/#node">Свой узел</a></nav>
+  </header>
+
+  <div class="hero">
+    <h1>Режет ли ваш провайдер UDP?</h1>
+    <p class="lead">Нажмите кнопку: получите ответ «режется или нет», а если режется, готовый текст для техподдержки с местом обрыва маршрута.</p>
+    <div class="cta">
+      <button class="go" id="go" type="button">Проверить мою сеть</button>
+      <span class="hint">Выключите VPN и обход блокировок, иначе проверится он, а не провайдер. Занимает около 10 секунд.</span>
+    </div>
+
+    <div id="result" aria-live="polite">
+      <div class="card answer" id="answer"></div>
+      <div class="card" id="udpweb"></div>
+      <div class="card" id="support"></div>
+      <div class="card"><details id="routes"><summary>Маршруты до вас подробно</summary><div id="routesBody"></div></details></div>
+    </div>
+  </div>
+
+  <section id="providers">
+    <h2>Провайдеры</h2>
+    <p class="muted small" style="margin:-6px 0 12px">Статус по замерам узлов и проверкам посетителей за последние 6 часов. График показывает долю замеров, где UDP из-за рубежа не проходит. Нажмите на карточку: подробный график, итоги по серверам и маршруты. Карточка провайдера появляется сама, как только в его сети сделают проверку или заработает узел.</p>
+    <div class="psearch"><input id="psearch" type="search" placeholder="Найти провайдера: название или номер AS" autocomplete="off" aria-label="Найти провайдера"></div>
+    <div class="pgrid" id="pgrid"><div class="muted small">Загружаю…</div></div>
+    <div class="pmore" id="pmore" hidden></div>
+    <details id="hostbox" style="margin-top:14px" hidden>
+      <summary>Хостинги и VPN: <span id="hostcount"></span></summary>
+      <p class="muted small" style="margin:8px 0 12px">Сюда попадают проверки, сделанные с включённым VPN или с серверов: адрес принадлежит хостингу, а не обычному провайдеру, поэтому в основной список они не входят.</p>
+      <div class="pgrid" id="pgrid2"></div>
+    </details>
+  </section>
+
+  <section id="journal">
+    <h2>Журнал</h2>
+    <p class="muted small" style="margin:-6px 0 12px">Когда у провайдера менялась картина: сеть впервые появилась в проверках, статус сменился, или одна из проверок показала порезку там, где её раньше не было. Хостинги и VPN сюда не попадают.</p>
+    <div class="card"><div id="jlist" class="small muted">Загружаю…</div></div>
+  </section>
+
+  <section id="provider"></section>
+
+  <section id="how">
+    <h2>Кто есть кто</h2>
+    <div class="grid three">
+      <div class="card step"><b>Вы</b><small>Нажимаете кнопку. Браузер шлёт UDP на наши серверы и спрашивает, получили ли они запросы, а серверы строят маршрут до вас.</small></div>
+      <div class="card step"><b>Узел: спрашивает</b><small>Домашний компьютер или роутер добровольца. Раз в 15 минут сам шлёт пакеты наружу и смотрит, вернулись ли ответы. Проверяет свою сеть, где режут UDP.</small></div>
+      <div class="card step"><b>Опорный сервер: отвечает</b><small>Сервер или VPS с публичным IP. Принимает пакеты и отвечает на них, сам ничего не проверяет. Это точка отсчёта в стране и за рубежом.</small></div>
+    </div>
+    <p class="small muted" style="margin:12px 0 0">Установщик сам выбирает роль: машина с публичным IP становится опорным сервером, домашняя сеть узлом. Вывод «режется или нет» строится по опорным серверам проекта. Серверы добровольцев участвуют в проверках как независимые свидетели: они могут смягчить вывод («режется выборочно»), но обвинить провайдера сами не могут. В стране, где серверов проекта нет, они служат точкой отсчёта.</p>
+  </section>
+
+  <section id="nodes">
+    <h2>Узлы и опорные серверы</h2>
+    <div class="card">
+      <h3 style="margin-top:0">Опорные серверы проекта</h3>
+      <p class="small muted" style="margin:0 0 6px">Для каждого посетителя и узла точкой отсчёта служат серверы из его страны, все остальные считаются зарубежными.</p>
+      <div id="anchors"></div>
+      <h3>Опорные серверы добровольцев</h3>
+      <div id="refsSummary" class="small muted">Загружаю…</div>
+      <div class="nodegrid" id="refsGrid"></div>
+      <h3 style="margin-top:18px">Узлы</h3>
+      <div id="nodesSummary" class="small muted">Загружаю…</div>
+      <div class="nodegrid" id="nodesGrid"></div>
+    </div>
+  </section>
+
+  <section id="node">
+    <h2>Подключить свой сервер или роутер</h2>
+    <div class="card">
+      <p style="margin-top:0">Одна строка для Linux и OpenWrt, нужен root или sudo. Установщик сам выберет роль: <b>VPS или сервер с публичным IP</b> станет опорным сервером (нужно открыть UDP 47321, 47322 и TCP 47321), <b>домашняя сеть или роутер</b> станет узлом (открывать ничего не нужно).</p>
+      <div class="cmdrow"><div class="t">Установка</div><pre class="cmd" id="c1">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh</pre><button class="copy" data-for="c1" type="button">Скопировать</button></div>
+      <details style="margin-top:12px"><summary>Подробнее: что делает установщик, как отключить опорную роль, удалить, Windows</summary>
+        <p class="small muted">Определит систему, при необходимости поставит Python, скачает агент и сверит SHA-256, запустит службу под пользователем без прав. SSH и другие службы не трогает. Фаервол сам не меняет: если порты опорной роли окажутся закрыты, покажет, какие именно, и предложит открыть их, но только с вашего согласия. Перед началом покажет план и подождёт 5 секунд (отмена Ctrl+C). Код: <a href="/install-node.sh">install-node.sh</a>. Если опорный сервер недоступен снаружи (фаервол, NAT), он остаётся неактивным, пока порты не откроют.</p>
+        <div class="cmdrow"><div class="t">Принудительно роль «узел» (сам проверяет сеть, ничего не слушает)</div><pre class="cmd" id="c4">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | UDPCHECK_ROLE=node sh</pre><button class="copy" data-for="c4" type="button">Скопировать</button></div>
+        <div class="cmdrow"><div class="t">Принудительно роль «опорный сервер» (только отвечает на проверки)</div><pre class="cmd" id="c5">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | UDPCHECK_ROLE=ref sh</pre><button class="copy" data-for="c5" type="button">Скопировать</button></div>
+        <div class="cmdrow"><div class="t">Удалить (служба, файлы, токен)</div><pre class="cmd" id="c3">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh -s -- uninstall</pre><button class="copy" data-for="c3" type="button">Скопировать</button></div>
+        <div class="cmdrow"><div class="t">Windows (PowerShell, нужен Python 3.7+). На macOS то же через curl и python3</div><pre class="cmd" id="c2">iwr https://dagart.xyz/node/udpcheck_node.py -OutFile udpcheck_node.py; python udpcheck_node.py</pre><button class="copy" data-for="c2" type="button">Скопировать</button></div>
+        <p class="small muted" style="margin-bottom:0">Если работает прокси или VPN (Throne, v2rayN, Passwall и т. п.), узел это заметит, и такой замер не учтётся.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="help-anchor">
+    <h2>Нет опоры в вашей стране? Добавьте сервер</h2>
+    <div class="card">
+      <p style="margin-top:0">Чтобы сервис мог сравнивать «у вас» и «из-за рубежа», ему нужен опорный сервер в вашей стране. Пока таких нет, его роль могут выполнить серверы добровольцев.</p>
+      <ol class="clean" style="padding-left:20px">
+        <li>Нужен сервер или VPS в вашей стране: Linux, публичный IPv4 (не за NAT).</li>
+        <li>Откройте в фаерволе UDP 47321, 47322 и TCP 47321.</li>
+        <li>Запустите строку установки из раздела «Подключить свой сервер»: сервер с публичным IP сам станет опорным. Через минуту он появится в списке опорных серверов добровольцев.</li>
+      </ol>
+      <p class="small muted" style="margin-bottom:0">Сервер добровольца участвует в проверках посетителей и узлов как независимый свидетель: может смягчить вывод («режется выборочно»), но обвинить провайдера сам не может. Там, где серверов проекта нет, он служит точкой отсчёта. IP сервера станет известен узлам и браузерам посетителей, которых он проверяет.</p>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <h2>Что мы видим и храним</h2>
+    <div class="card">
+      <ul class="clean">
+        <li>Ваш IP виден на время запроса, чтобы построить маршрут и определить провайдера. <b>В базу он не записывается.</b></li>
+        <li>Храним номер сети провайдера (ASN), страну, примерный город и результаты замеров, 60 дней.</li>
+        <li>Страница создаёт в вашем браузере случайный анонимный номер: он нужен только для лимитов и подсчёта проверок. Он не связан с вами и не собирает данные об устройстве. Удалить его можно, очистив данные сайта.</li>
+        <li>Публично: статистика по провайдерам и список узлов (позывной, сеть, число замеров). Адресов и городов нет.</li>
+        <li>Опорный сервер добровольца: его IP знают хаб, узлы, которым хаб назначил этот сервер, и браузеры посетителей, которых он участвует проверять (до двух таких серверов за проверку). Сервер видит IP узлов и посетителей так же, как видит любой STUN-сервер в интернете. Трассировки до адреса посетителя ему не передаются. Домашний узел IP никому не отдаёт.</li>
+        <li>Вопросы, удаление данных, замечания по логотипам и названиям провайдеров: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a>.</li>
+        <li>Проект тестовый. Выводы относятся к проверенным серверам и к моменту замера.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <div id="attr">IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (CC BY 4.0). Названия городов: <a href="https://www.geonames.org">GeoNames</a> (CC BY 4.0)</div>
+    <div><a href="/protocol.txt">Протокол узлов</a> · Связь: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a></div>
+  </footer>
+</div>
+
+<div id="newver" hidden><span>Вышла новая версия сайта.</span><button type="button" class="btn" id="newverBtn">Обновить</button></div>
+<script>
+(function(){
+"use strict";
+var BUILD = "__BUILD__";
+var $ = function(id){ return document.getElementById(id); };
+function el(tag, cls, text){ var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function hue(asn){ return (asn * 47) % 360; }
+function pl(n, a){ var m = n % 100, d = n % 10; if (m > 10 && m < 20) return a[2]; if (d === 1) return a[0]; if (d > 1 && d < 5) return a[1]; return a[2]; }
+function ago(s){ if (s < 90) return "меньше двух минут назад"; if (s < 5400) return Math.round(s/60) + " мин назад"; return Math.round(s/3600) + " ч назад"; }
+function asName(a){ return "AS" + a.asn + (a.org ? " " + a.org : ""); }
+function chip(a, extra){
+  var c = el("span", "chip", asName(a) + (extra ? " " + extra : ""));
+  c.style.borderColor = "hsl(" + hue(a.asn) + " 55% 50%)";
+  c.style.background = "hsl(" + hue(a.asn) + " 55% 50% / .16)";
+  return c;
+}
+// Случайный анонимный номер браузера: страница создаёт его сама и хранит у себя. Не отпечаток и не связан с личностью;
+// нужен, чтобы лимиты считались на устройство, а не на общий адрес мобильного оператора. Очистка данных сайта его удаляет.
+var CID = (function(){
+  var c = "";
+  try { c = localStorage.getItem("udpc_cid") || ""; } catch(e){}
+  if (/^[0-9a-f]{32}$/.test(c)) return c;
+  var a = new Uint8Array(16);
+  try { crypto.getRandomValues(a); } catch(e){ for (var i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256); }
+  c = Array.prototype.map.call(a, function(x){ return ("0" + x.toString(16)).slice(-2); }).join("");
+  try { localStorage.setItem("udpc_cid", c); } catch(e){}
+  return c;
+})();
+function api(method, path){
+  return fetch(path, {method: method, headers: {"Accept": "application/json", "X-Client": CID}}).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(j){ return {status: r.status, body: j, retry: parseInt(r.headers.get("Retry-After"), 10) || 0}; });
+  });
+}
+var VERD = {
+  FOREIGN_IN_CUT: {cls: "v-bad",  big: "Режется", line: "UDP из-за рубежа до вас не доходит",
+                   what: "Звонки, игры, QUIC и VPN по UDP с зарубежными серверами могут работать плохо или совсем не работать. Внутри страны UDP при этом идёт нормально."},
+  FOREIGN_OUT_CUT:{cls: "v-bad",  big: "Режется", line: "UDP за рубеж от вас не уходит",
+                   what: "Исходящий UDP к зарубежным серверам блокируется. До точки в вашей стране UDP идёт нормально."},
+  FOREIGN_PARTIAL:{cls: "v-warn", big: "Режется частично", line: "UDP проходит не ко всем зарубежным серверам",
+                   what: "К части серверов UDP идёт, к другим нет: фильтр выборочный."},
+  NO_BLOCK:       {cls: "v-ok",   big: "Не режется", line: "UDP проходит и внутри страны, и из-за рубежа",
+                   what: "Блокировки UDP на проверенных серверах не видно."},
+  CONTROL_BAD:    {cls: "v-idle", big: "Замер ненадёжен", line: "контрольная точка в вашей стране не прошла", what: "Вывод по зарубежным серверам в этом случае недостоверен."},
+  CONTROL_DOWN:   {cls: "v-idle", big: "Замер ненадёжен", line: "контроль в вашей стране не ответил", what: ""},
+  UNSTABLE_PATH:  {cls: "v-idle", big: "Замер ненадёжен", line: "запросы к разным серверам вышли с разных адресов",
+                   what: "Так бывает при раздельной маршрутизации, VPN, прокси, а у некоторых операторов просто из-за устройства сети. Честно сравнить серверы нельзя, в общую статистику такой результат не передаётся."},
+  NO_ANCHOR:      {cls: "v-idle", big: "Не на что опираться", line: "в вашей стране нашему сервису пока не на что опираться",
+                   what: "Нет опорного сервера в вашей стране, поэтому сравнить «у вас» и «из-за рубежа» нельзя. Вы можете помочь: добавьте сервер из вашей страны."},
+  NO_FOREIGN:     {cls: "v-idle", big: "Замер ненадёжен", line: "зарубежные серверы не ответили", what: ""}
+};
+var me = null, browserRes = null, traceData = null;
+function isHome(k){ return k !== "foreign"; }
+function cname(code){ try { return new Intl.DisplayNames(["ru"], {type: "region"}).of(code); } catch(e){ return code; } }
+function noAnchor(){ return !!(me && me.home && me.home.anchors === 0 && me.home.community === 0); }
+function helpLink(txt){ var a = el("a", null, txt || "Как добавить сервер"); a.href = "/#help-anchor"; return a; }
+
+// --- UDP-проверка из браузера: WebRTC шлёт STUN-запросы (UDP) на наши серверы, ответ значит «входящий UDP с него до вас проходит»
+function stunOnce(ip, port){
+  return new Promise(function(resolve){
+    var done = false, pc = null;
+    function fin(v){ if (done) return; done = true; try { if (pc) pc.close(); } catch(e){} resolve(v); }
+    try { pc = new RTCPeerConnection({iceServers: [{urls: "stun:" + ip + ":" + port}]}); } catch(e){ return resolve(false); }
+    pc.onicecandidate = function(e){
+      if (e.candidate && / typ srflx /.test(e.candidate.candidate)) fin(e.candidate.candidate.split(" ")[4] || "?");
+      else if (!e.candidate) fin(false);
+    };
+    try {
+      pc.createDataChannel("c");
+      pc.createOffer().then(function(o){ return pc.setLocalDescription(o); }).catch(function(){ fin(false); });
+    } catch(e){ fin(false); }
+    setTimeout(function(){ fin(false); }, 3000);
+  });
+}
+function seenKnown(r){ return r.seen !== null && r.seen !== undefined; }
+function browserVerdict(results){
+  function st(r){ return r.ok === 0 ? "dead" : (r.ok >= r.n * 0.8 ? "ok" : "part"); }
+  // Серверы проекта решают, режется ли. Серверы добровольцев это независимые свидетели: если до них UDP идёт, а до серверов проекта нет,
+  // вывод смягчается («выборочно»); если до них не идёт, а до серверов проекта идёт, это не блокировка. Обвинить провайдера они сами не могут.
+  var ru = results.filter(function(r){ return isHome(r.kind) && (!r.community || r.control); });
+  var fr = results.filter(function(r){ return !isHome(r.kind) && !r.community; });
+  var vf = results.filter(function(r){ return !isHome(r.kind) && r.community; });
+  if (!ru.length) return "NO_ANCHOR";
+  if (!ru.some(function(r){ return st(r) === "ok"; }) || !fr.length) return "CONTROL_BAD";
+  var s = fr.map(st);
+  if (s.every(function(x){ return x === "ok"; })) return "NO_BLOCK";
+  if (s.every(function(x){ return x === "dead"; })) {
+    if (vf.some(function(r){ return st(r) === "ok"; })) return "FOREIGN_PARTIAL";
+    // серверы сказали, получили ли они наши запросы: ни один не получил, значит режется исходящее, иначе входящее
+    if (fr.every(seenKnown) && !fr.some(function(r){ return r.seen > 0; })) return "FOREIGN_OUT_CUT";
+    return "FOREIGN_IN_CUT";
+  }
+  return "FOREIGN_PARTIAL";
+}
+// Длинные ответы идут с отдельных портов: сравниваем с тем, что короткие ответы от этого же сервера доходят
+function sizeInfo(results){
+  var cut = [], part = [], tested = 0, sizes = {};
+  results.forEach(function(r){
+    if (r.community || !r.pad || !r.pad.length || r.ok === 0) return;
+    r.pad.forEach(function(p){
+      tested++; sizes[p.size] = 1;
+      if (p.ok === 0) cut.push({name: r.name, kind: r.kind, port: p.port, size: p.size});
+      else if (p.ok < p.n) part.push({name: r.name, kind: r.kind, port: p.port, size: p.size});
+    });
+  });
+  return {cut: cut, part: part, tested: tested, max: Object.keys(sizes).reduce(function(a, b){ return Math.max(a, +b); }, 0)};
+}
+function sizeText(si){
+  if (!si || !si.tested) return "";
+  var f = si.cut.filter(function(x){ return !isHome(x.kind); });
+  if (f.length) {
+    var big = f.reduce(function(a, b){ return Math.max(a, b.size); }, 0);
+    return "Короткие ответы проходят, а длинные (" + big + " байт) от " + f.length + " " + pl(f.length, ["сервера", "серверов", "серверов"]) + " не доходят. Похоже, UDP режут по размеру пакета. Но причина может быть и в порту: длинные ответы идут с портов " + f.map(function(x){ return x.port; }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(", ") + ".";
+  }
+  if (si.part.length) return "Длинные ответы доходят не всегда (часть потеряна): возможна порезка по размеру пакета или просто нестабильная связь.";
+  return "Длинные ответы (до " + si.max + " байт) тоже доходят.";
+}
+function runPool(tasks, limit){
+  return new Promise(function(resolve){
+    var i = 0, active = 0, done = 0;
+    if (!tasks.length) return resolve();
+    function fin(){ active--; done++; if (done === tasks.length) resolve(); else next(); }
+    function next(){ while (active < limit && i < tasks.length) { active++; tasks[i++]().then(fin, fin); } }
+    next();
+  });
+}
+function runBrowserUdp(onTick){
+  if (typeof RTCPeerConnection === "undefined") return Promise.resolve({unsupported: true});
+  return api("GET", "/api/v2/web/stun").then(function(r){
+    if (r.status !== 200 || !r.body.targets) return {error: true};
+    var N = r.body.attempts || 3;
+    var results = [], tasks = [];
+    r.body.targets.forEach(function(t){
+      var res = {code: t.code, kind: t.kind, name: t.community ? cname(t.country) + ", сервер добровольца" : t.name, ok: 0, n: t.ports.length * N, ips: {},
+                 community: !!t.community, control: !!t.control};
+      res.pad = (t.pad || []).map(function(pp){ return {port: pp.port, size: pp.size, ok: 0, n: N}; });
+      res.ip = t.ip;
+      results.push(res);
+      t.ports.forEach(function(port){
+        tasks.push(function(){
+          var chain = Promise.resolve();
+          for (var i = 0; i < N; i++) chain = chain.then(function(){ return stunOnce(t.ip, port).then(function(ok){ if (ok) { res.ok++; res.ips[ok] = 1; } if (onTick) onTick(); }); });
+          return chain;
+        });
+      });
+    });
+    // не больше 10 одновременных соединений: у части браузеров (WebKit) при большем числе теряются ответы и на исправных портах
+    return runPool(tasks, 10).then(function(){
+      var padTasks = [];
+      results.forEach(function(res){
+        (res.pad || []).forEach(function(pp){
+          padTasks.push(function(){
+            var chain = Promise.resolve();
+            for (var j = 0; j < N; j++) chain = chain.then(function(){ return stunOnce(res.ip, pp.port).then(function(ok){ if (ok) pp.ok++; if (onTick) onTick(); }); });
+            return chain;
+          });
+        });
+      });
+      return runPool(padTasks, 10).then(function(){ return results; });
+    }).then(function(results){
+      // спрашиваем у серверов, сколько наших STUN-запросов они получили: так видно, на каком пути потеря
+      return api("POST", "/api/v2/web/stunseen").then(function(sr){
+        if (sr.status !== 202) return results;
+        var id = sr.body.id, tries = 0;
+        return new Promise(function(resolve){
+          (function poll(){
+            api("GET", "/api/v2/web/stunseen/" + id).then(function(g){
+              if (g.status === 200 && (g.body.done || ++tries > 8)) { results.forEach(function(r){ var v = g.body.seen && g.body.seen[r.code], w = g.body.replied && g.body.replied[r.code]; r.seen = (v === null || v === undefined) ? null : v; r.replied = (w === null || w === undefined) ? null : w; }); resolve(results); }
+              else if (++tries > 8) resolve(results); else setTimeout(poll, 800);
+            }).catch(function(){ resolve(results); });
+          })();
+        });
+      }).catch(function(){ return results; });
+    }).then(function(results){
+      // все серверы должны были увидеть нас с одного внешнего адреса; если нет, запросы шли разными путями (раздельная маршрутизация, VPN, прокси, особенности оператора)
+      var all = {}; results.forEach(function(r){ for (var k in r.ips) if (k !== "?") all[k] = 1; });
+      var mixed = Object.keys(all).length > 1;
+      return {results: results, size: sizeInfo(results), verdict: mixed ? "UNSTABLE_PATH" : browserVerdict(results), mixed: mixed, seenFailed: results.some(function(r){ return !r.community && !seenKnown(r); })};
+    });
+  });
+}
+function renderWeb(state){
+  var box = $("udpweb"); box.innerHTML = "";
+  box.appendChild(el("h3", null, "UDP-проверка прямо из вашего браузера"));
+  if (state === "running") { var p = el("div", "muted small"); p.innerHTML = '<span class="spin"></span>Шлём несколько маленьких UDP-запросов на наши серверы и ждём ответы…'; box.appendChild(p); return; }
+  if (!state || state.unsupported || state.error) {
+    box.appendChild(el("div", "muted small", state && state.unsupported ? "Ваш браузер не поддерживает WebRTC, поэтому проверку из браузера сделать нельзя." : "Не удалось получить список серверов для проверки."));
+    return;
+  }
+  box.appendChild(el("div", "small muted", "Каждый сервер получает несколько маленьких UDP-запросов и должен ответить. Ответ дошёл до вас: входящий UDP с этого сервера проходит. Затем серверы проекта отвечают длинными пакетами (600 и 1200 байт) с других портов: так видно, не режут ли UDP по размеру. Тест слабее замера узла (мало пакетов, нет потока)."));
+  var tb = el("div"); tb.style.marginTop = "10px";
+  state.results.forEach(function(r){
+    var row = el("div", "cutline");
+    var cls = r.ok === 0 ? "dead" : (r.ok >= r.n * 0.8 ? "reach" : "dead");
+    row.appendChild(el("span", "k", isHome(r.kind) ? "в вашей стране" : "из-за рубежа"));
+    row.appendChild(el("span", null, r.name + ": "));
+    row.appendChild(el("b", cls, "ответов " + r.ok + " из " + r.n));
+    if (r.community) row.appendChild(el("span", "muted small", "свидетель: сам вывод не определяет"));
+    if (seenKnown(r) && !isHome(r.kind) || (seenKnown(r) && r.ok < r.n)) row.appendChild(el("span", "muted small", r.seen > 0 ? (r.replied > 0 && r.ok < r.n ? "входящий UDP от этого сервера до вас не доходит: он получил ваши запросы и отправил ответы" : "сервер ваши запросы получил") : "исходящий UDP до этого сервера не доходит: запросы не дошли"));
+    if (r.pad && r.pad.length) row.appendChild(el("span", "muted small", "длинные ответы: " + r.pad.map(function(p){ return p.size + " Б: " + p.ok + " из " + p.n; }).join(", ")));
+    tb.appendChild(row);
+  });
+  box.appendChild(tb);
+  var st = sizeText(state.size);
+  if (st) { var sd = el("div", "small", st); sd.style.marginTop = "8px"; if (state.size.cut.some(function(x){ return !isHome(x.kind); })) sd.style.color = "var(--warn)"; box.appendChild(sd); }
+  if (state.mixed) box.appendChild(el("div", "small muted", "Серверы увидели вас с разных внешних адресов, поэтому проверка не сравнивает провайдера честно. В статистику она не передана."));
+  if (state.seenFailed) box.appendChild(el("div", "small muted", "Подтверждение от серверов, дошли ли ваши запросы, получить не удалось: о направлении потери судить нельзя."));
+  if (state.verdict === "CONTROL_BAD") box.appendChild(el("div", "small muted", "Серверы в вашей стране не ответили: возможно, включён VPN, браузер блокирует WebRTC или проблема с сетью. Вывод ненадёжен."));
+  if (state.verdict === "NO_ANCHOR") { var na = el("div", "small muted", "В вашей стране у нас пока нет опорного сервера, сравнивать не с чем. "); na.appendChild(helpLink("Как помочь")); box.appendChild(na); }
+}
+
+function renderAnswer(m){
+  var box = $("answer"); box.innerHTML = "";
+  var n = m && m.network, y = (m && m.you) || {};
+  var cls = "v-idle", label = "Нет данных", big, line, what, note = "";
+  var na = noAnchor() && !(n && n.rounds > 0 && !(n.verdicts && n.verdicts.NO_ANCHOR === n.rounds));
+  if (na) {
+    cls = VERD.NO_ANCHOR.cls; big = VERD.NO_ANCHOR.big; line = VERD.NO_ANCHOR.line; what = VERD.NO_ANCHOR.what; label = "Нет точки отсчёта";
+  } else if (n && n.rounds > 0) {
+    var top = null, topN = 0, v;
+    for (v in n.verdicts) { if (n.verdicts[v] > topN) { top = v; topN = n.verdicts[v]; } }
+    var info = VERD[top] || VERD.CONTROL_BAD;
+    var weak = n.nodes < 2 || n.rounds < 5;
+    cls = info.cls; big = info.big; line = info.line; what = info.what;
+    var tfo = n.tcp_foreign;
+    if (top === "FOREIGN_IN_CUT" && tfo && tfo.total >= 3 && tfo.ok / tfo.total >= 0.9) what += " TCP до тех же серверов при этом проходит: не работает именно UDP.";
+    label = weak ? "Предварительно" : "По данным узлов";
+    note = "Основание: " + n.rounds + " " + pl(n.rounds, ["замер", "замера", "замеров"]) + " от " + n.nodes + " " + pl(n.nodes, ["узла", "узлов", "узлов"]) + " вашего провайдера за 24 часа, такой итог в " + topN + " из " + n.rounds + ". Последний замер: " + (n.last ? ago(n.last.age_s) : "—") + "." +
+           (weak ? " Данных мало: нужно хотя бы 2 узла и 5 замеров для уверенного вывода." : "");
+  } else if (browserRes && browserRes.verdict && browserRes.verdict !== "CONTROL_BAD" && browserRes.verdict !== "UNSTABLE_PATH") {
+    var bi = VERD[browserRes.verdict];
+    cls = bi.cls; big = bi.big; line = bi.line; what = bi.what; label = "По проверке в вашем браузере";
+    note = "У вашего провайдера пока нет узлов, ответ основан на UDP-проверке из браузера (несколько маленьких пакетов, слабее замера узла)";
+    var si = browserRes.size, fcut = si && si.cut.filter(function(x){ return !isHome(x.kind); });
+    if (browserRes.verdict === "NO_BLOCK" && fcut && fcut.length) {
+      cls = "v-warn"; big = "Режутся длинные пакеты"; line = "короткие UDP-ответы доходят, длинные нет";
+      what = sizeText(si);
+    } else if (browserRes.verdict === "NO_BLOCK") {
+      note += si && si.tested ? ". " + sizeText(si) : ". Длинные пакеты и сплошной поток не проверялись";
+    }
+  } else if (browserRes && browserRes.mixed) {
+    cls = VERD.UNSTABLE_PATH.cls; big = VERD.UNSTABLE_PATH.big; line = VERD.UNSTABLE_PATH.line; what = VERD.UNSTABLE_PATH.what; label = "По проверке в вашем браузере";
+  } else {
+    big = "Пока не знаем"; line = "у вашего провайдера нет узлов, прямой проверки UDP нет";
+    what = "Маршруты и текст для техподдержки ниже всё равно можно использовать. Чтобы получить точный ответ, подключите узел (раздел «Свой узел») или попросите кого-то с тем же провайдером.";
+  }
+  box.className = "card answer " + cls;
+  box.appendChild(el("span", "badge " + cls, label));
+  box.appendChild(el("div", "big", big));
+  box.appendChild(el("div", null, line + "."));
+  if (what) { var wd = el("div", "muted small", what + (na ? " " : "")); if (na) wd.appendChild(helpLink("Как добавить")); box.appendChild(wd); }
+  var p = el("div", "small muted"); p.style.marginTop = "10px";
+  p.textContent = "Ваш провайдер по базе IP: " + (y.asn ? "AS" + y.asn + " " + (y.org || "") : "не определён") + (y.city ? " · " + y.city + " (приблизительно)" : "") + (note ? ". " + note : "");
+  box.appendChild(p);
+  if (browserRes && browserRes.verdict && n && n.rounds > 0) {
+    var bl = el("div", "small muted", "Проверка в вашем браузере прямо сейчас: " + ((VERD[browserRes.verdict] || {}).big || browserRes.verdict) + ".");
+    bl.style.marginTop = "6px"; box.appendChild(bl);
+  }
+}
+
+function summarize(res){
+  var out = {};
+  ["icmp","udp","tcp"].forEach(function(m){
+    var r = res && res[m]; if (!r) return;
+    var ap = r.as_path || [];
+    out[m] = {ttl: r.last_responding_ttl, as: ap.length ? ap[ap.length-1] : null, reached: r.reached};
+  });
+  return out.icmp || out.udp || out.tcp || null;
+}
+var longStat = null;
+function p2(x){ return (x < 10 ? "0" : "") + x; }
+function fmtDate(d){ return p2(d.getDate()) + "." + p2(d.getMonth() + 1) + "." + d.getFullYear() + " " + p2(d.getHours()) + ":" + p2(d.getMinutes()); }
+function tzName(){ var o = -new Date().getTimezoneOffset() / 60; return "UTC" + (o >= 0 ? "+" : "") + o; }
+function listJoin(a){ return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " и " + a[a.length - 1]; }
+function cityOf(name){ var p = String(name).split(","); return (p[1] || p[0]).trim(); }
+function countryOf(name){ return String(name).split(",")[0].trim(); }
+function longTerm(){
+  if (!longStat || !longStat.buckets || !longStat.buckets.length) return null;
+  var total = 0, cut = 0, first = null, last = null;
+  longStat.buckets.forEach(function(b){
+    total += b.rounds; cut += (b.verdicts.FOREIGN_IN_CUT || 0) + (b.verdicts.FOREIGN_PARTIAL || 0);
+    if (first === null || b.hour < first) first = b.hour; if (last === null || b.hour > last) last = b.hour;
+  });
+  var hours = Math.round((last - first) / 3600) + 1;
+  return {total: total, cut: cut, hours: hours, span: hours < 36 ? hours + " " + pl(hours, ["час", "часа", "часов"]) : Math.round(hours / 24) + " " + pl(Math.round(hours / 24), ["сутки", "суток", "суток"])};
+}
+// Текст строится так, чтобы на типовые ответы («авария, скоро решим», «проблема у зарубежных серверов», «у вас на устройстве») уже были факты.
+function buildComplaint(data){
+  var y = (me && me.you) || {}, n = me && me.network, br = (browserRes && browserRes.results) ? browserRes : null;
+  var top = null, topN = 0, v;
+  if (n && n.rounds > 0) for (v in n.verdicts) if (n.verdicts[v] > topN) { top = v; topN = n.verdicts[v]; }
+  var nodeCut = top === "FOREIGN_IN_CUT" || top === "FOREIGN_PARTIAL";
+  var brCut = br && !br.mixed && (br.verdict === "FOREIGN_IN_CUT" || br.verdict === "FOREIGN_PARTIAL");
+  if (!nodeCut && !brCut) return null;
+  var ru = br ? br.results.filter(function(r){ return isHome(r.kind); }) : [], fr = br ? br.results.filter(function(r){ return !isHome(r.kind); }) : [];
+  var frBad = fr.filter(function(r){ return !r.community && r.ok < r.n * 0.8; });      // свидетелей-добровольцев среди «недоступных» не называем: у них свои причины молчать
+  var lt = longTerm(), longCut = lt && lt.total >= 5 && lt.cut / lt.total >= 0.8;
+  var tf = n && n.tcp_foreign, tcpOk = !!(nodeCut && tf && tf.total >= 3 && tf.ok / tf.total >= 0.9);
+  var prov = y.asn ? "AS" + y.asn + " " + (y.org || "") : "оператор не определён";
+  var L = [];
+  L.push("Тема: не проходит входящий UDP-трафик из-за рубежа (проверка " + fmtDate(new Date()) + ", " + tzName() + ")");
+  L.push("");
+  L.push("Добрый день. Моё подключение к интернету: " + prov.trim() + ". Прошу рассмотреть обращение по существу.");
+  L.push("");
+  var frOkList = fr.filter(function(r){ return r.ok >= r.n * 0.8; });
+  L.push(frOkList.length
+    ? "Проблема: UDP-пакеты от части серверов за рубежом до меня не доходят (" + frBad.map(function(r){ return r.name; }).join("; ") + "), ответы на мои UDP-запросы к ним не приходят. До остальных зарубежных серверов и до серверов внутри моей страны UDP доходит."
+    : "Проблема: UDP-пакеты от серверов за рубежом до меня не доходят, ответы на мои UDP-запросы к ним не приходят. От серверов внутри моей страны UDP доходит.");
+  L.push("");
+  L.push("Что показала проверка независимыми серверами проекта dagart.xyz (выполнена при выключенных VPN и прокси):");
+  if (br && ru.length) L.push(" - Серверы в моей стране (" + ru.map(function(r){ return cityOf(r.name); }).join(", ") + "): ответов на мои UDP-запросы " +
+    ru.reduce(function(a, r){ return a + r.ok; }, 0) + " из " + ru.reduce(function(a, r){ return a + r.n; }, 0) + ". Канал работает.");
+  if (br && frBad.length) L.push(" - Зарубежные серверы: " + frBad.map(function(r){ return r.name + ": " + r.ok + " из " + r.n; }).join("; ") + ".");
+  var gotReq = frBad.filter(function(r){ return seenKnown(r) && r.seen > 0 && r.ok === 0; });
+  if (gotReq.length) {
+    var gotRep = gotReq.filter(function(r){ return r.replied > 0; });
+    L.push(" - Эти серверы подтверждают, что мои запросы получили" + (gotRep.length === gotReq.length ? " и отправили на них ответы" : "") + " (" + gotReq.map(function(r){ return cityOf(r.name); }).join(", ") +
+      "), а ответы до меня не дошли: потеряно именно движение к моему адресу из-за рубежа.");
+  }
+  if (nodeCut && n) L.push(" - Узлы проекта в сети вашего оператора (" + n.nodes + " " + pl(n.nodes, ["узел", "узла", "узлов"]) + "): в " + topN + " из " + n.rounds + " замеров за сутки " +
+    (top === "FOREIGN_IN_CUT" ? "пакеты до зарубежных серверов доходят (серверы это подтверждают), а ответы обратно не приходят." : "UDP до части зарубежных серверов не проходит."));
+  if (tcpOk) L.push(" - TCP до тех же зарубежных серверов с узлов проекта в вашей сети проходит (" + tf.ok + " из " + tf.total + " проверок, данные передаются в обе стороны): серверы и маршрут доступны, не работает именно UDP.");
+  if (longCut) L.push(" - За " + lt.span + " наблюдений: " + lt.cut + " из " + lt.total + " замеров узлов в сети вашего оператора с тем же результатом.");
+  var groups = {}, order = [];
+  ((data && data.targets) || []).forEach(function(t){
+    if (isHome(t.kind) || t.status !== "done") return;
+    var sm = summarize(t.results);
+    if (!sm || sm.reached || !sm.as) return;
+    var k = sm.as.asn;
+    if (!groups[k]) { groups[k] = {as: sm.as, cities: []}; order.push(k); }
+    groups[k].cities.push(cityOf(t.name));
+  });
+  // маршруты приводим, только если из моей страны до меня доходит: иначе обрыв объясняется молчанием домашнего оборудования, а не фильтром
+  if (order.length && ruReached(data || {targets: []})) L.push(" - Маршруты от зарубежных серверов до моего адреса замолкают: " + order.map(function(k){
+    var g = groups[k];
+    return listJoin(g.cities) + " — " + (y.asn && g.as.asn === y.asn ? "внутри вашей сети " : "в сети ") + asName(g.as);
+  }).join("; ") + ". Дальше, до меня, ответов нет." + (data && data.stale ? " Маршруты сняты " + fmtDate(new Date(data.ts)) + "." : ""));
+  L.push("");
+  var countries = {}; frBad.forEach(function(r){ countries[countryOf(r.name)] = 1; });
+  var nc = Object.keys(countries).length;
+  L.push("Почему это не авария: серверы в моей стране отвечают в тот же момент, то есть канал работает" + (tcpOk ? ", а TCP до тех же зарубежных серверов проходит" : "") + "; теряется один вид трафика (UDP из-за рубежа)" +
+    (nc > 1 ? ", причём сразу от серверов в " + nc + " " + pl(nc, ["стране", "странах", "странах"]) + " (" + listJoin(Object.keys(countries)) + "), которые друг от друга не зависят" : "") +
+    (longCut && lt.hours >= 24 ? ", и так продолжается " + lt.span : "") + ". Если вы считаете это аварией, укажите её номер, время начала и срок устранения.");
+  L.push("");
+  L.push("Прошу ответить письменно:");
+  L.push("1. Применяется ли на вашей сети или у вышестоящих операторов фильтрация входящего UDP из-за рубежа (в том числе оборудованием, установленным по требованию регулятора)?");
+  L.push("2. Если нет, в каком месте, по вашим данным, теряются пакеты?");
+  L.push("3. Когда доступ будет восстановлен в полном объёме?");
+  L.push("");
+  L.push("Проверку можно повторить самостоятельно: https://dagart.xyz (кнопка «Проверить мою сеть»). Результаты по провайдерам открыты.");
+  return L.join("\n");
+}
+function renderSupport(data){
+  var box = $("support"); box.innerHTML = "";
+  var haveData = browserRes !== null || (me && me.network && me.network.rounds > 0) || noAnchor();
+  if (!haveData) { box.className = "card"; return; }
+  if (noAnchor() && !(me.network && me.network.rounds > 0 && !(me.network.verdicts && me.network.verdicts.NO_ANCHOR === me.network.rounds))) {
+    box.className = "card"; box.appendChild(el("h3", null, "Текст для техподдержки"));
+    var nt = el("div", "small muted", "Для вашей страны пока нет точки отсчёта, поэтому обращение к провайдеру подготовить нельзя. "); nt.appendChild(helpLink("Как помочь сервису")); box.appendChild(nt);
+    return;
+  }
+  var txt = buildComplaint(data);
+  box.className = "card";
+  box.appendChild(el("h3", null, "Текст для техподдержки"));
+  if (!txt && browserRes && browserRes.mixed) { box.appendChild(el("div", "small muted", "Проверка из браузера ненадёжна: запросы к разным серверам вышли с разных адресов (раздельная маршрутизация, VPN, прокси). Обращение по такому результату готовить нельзя: повторите проверку с устройства, у которого весь трафик идёт одним путём.")); return; }
+  if (!txt) { box.appendChild(el("div", "small muted", "Блокировки UDP не видно, поэтому обращение провайдеру не нужно. Если связь всё же плохая, повторите проверку позже или запустите её без VPN.")); return; }
+  box.appendChild(el("div", "small muted", "Готов к отправке, ваши данные уже подставлены. Перед отправкой убедитесь, что VPN и прокси на устройстве выключены: текст на это ссылается."));
+  var pre = el("pre", "txt", txt); pre.style.marginTop = "10px"; pre.id = "supportTxt"; box.appendChild(pre);
+  var b = el("button", "copy", "Скопировать текст"); b.type = "button";
+  b.addEventListener("click", function(){
+    var done2 = function(){ b.textContent = "Скопировано"; setTimeout(function(){ b.textContent = "Скопировать текст"; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done2, function(){});
+    else { var ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done2(); } catch(e){} document.body.removeChild(ta); }
+  });
+  box.appendChild(b);
+}
+function anyReached(res){ return ["icmp","udp","tcp"].some(function(m){ return res && res[m] && res[m].reached; }); }
+function ruReached(data){ return (data.targets || []).some(function(t){ return isHome(t.kind) && t.status === "done" && anyReached(t.results); }); }
+function bestTrace(res){
+  var best = null;
+  ["icmp","udp","tcp"].forEach(function(m){
+    var r = res && res[m]; if (!r) return;
+    var score = (r.reached ? 1000 : 0) + (r.as_path || []).length;
+    if (!best || score > best.score) best = {score: score, r: r};
+  });
+  return best && best.r;
+}
+function saveTrace(g){
+  try {
+    var t = g.targets.filter(function(x){ return x.status === "done"; }).map(function(x){
+      var res = {}; ["icmp","udp","tcp"].forEach(function(m){ var r = x.results && x.results[m]; if (r) res[m] = {as_path: r.as_path || [], reached: !!r.reached, last_responding_ttl: r.last_responding_ttl || 0}; });
+      return {code: x.code, kind: x.kind, name: x.name, status: "done", results: res};
+    });
+    if (t.length) localStorage.setItem("udpc_trace", JSON.stringify({ts: Date.now(), targets: t}));
+  } catch(e){}
+}
+function loadTrace(){
+  try { var o = JSON.parse(localStorage.getItem("udpc_trace")); if (o && o.targets && Date.now() - o.ts < 6 * 3600 * 1000) return o; } catch(e){}
+  return null;
+}
+function renderRoutes(data){
+  var box = $("routesBody"); box.innerHTML = "";
+  if (data.stale) {
+    var sn = el("div", "small"); sn.style.marginBottom = "10px";
+    sn.textContent = "Новую трассировку можно будет запустить через " + data.retryMin + " " + pl(data.retryMin, ["минуту", "минуты", "минут"]) + " (не чаще раза в 5 минут). Ниже маршруты, снятые " + fmtDate(new Date(data.ts)) + ".";
+    box.appendChild(sn);
+  }
+  var fin = data.targets.every(function(t){ return t.status !== "pending"; });
+  if (fin) {
+    var ruOk = ruReached(data), frOk = data.targets.some(function(t){ return !isHome(t.kind) && t.status === "done" && anyReached(t.results); });
+    var msg = ruOk
+      ? (frOk ? "Маршруты со всех серверов доходят до вас."
+              : "Из вашей страны маршрут до вас доходит, из-за рубежа нет: обрыв на пути между сетями, не у вас дома.")
+      : "Ни один маршрут, даже из вашей страны, не дошёл до вашего устройства до конца: домашний роутер и оборудование оператора обычно не отвечают на трассировку, хотя связь при этом работает. Поэтому по маршрутам вывод не делаем, ориентируйтесь на UDP-проверки выше.";
+    var nb = el("div", "small muted", msg); nb.style.marginBottom = "10px"; box.appendChild(nb);
+  }
+  [["home", "Из вашей страны"], ["foreign", "Из-за рубежа"]].forEach(function(gr){
+    var list = data.targets.filter(function(t){ return isHome(t.kind) === (gr[0] === "home"); });
+    if (!list.length) return;
+    var d = el("div", "tgt"); d.appendChild(el("h4", null, gr[1]));
+    list.forEach(function(t){
+      var row = el("div", "m"); row.appendChild(el("span", "nm", t.name));
+      var ch = el("span", "chain");
+      if (t.status === "pending") { var p = el("span", "muted small"); p.innerHTML = '<span class="spin"></span>ждём результат…'; ch.appendChild(p); }
+      else if (t.status === "timeout") ch.appendChild(el("span", "err small", "сервер не успел ответить"));
+      else {
+        var r = bestTrace(t.results), ap = r ? (r.as_path || []) : [];
+        if (!r) ch.appendChild(el("span", "muted small", "нет данных"));
+        else {
+          if (ap.length > 3) ch.appendChild(el("span", "muted small", "…"));
+          ap.slice(-3).forEach(function(a, i){ if (i || ap.length > 3) ch.appendChild(el("span", "muted small", "→")); ch.appendChild(chip(a)); });
+          ch.appendChild(el("span", r.reached ? "reach" : "muted small", r.reached ? "дошли до вас" : "дальше ответов нет"));
+        }
+      }
+      row.appendChild(ch); d.appendChild(row);
+    });
+    box.appendChild(d);
+  });
+}
+function renderTraces(data){ traceData = data; renderRoutes(data); renderSupport(data); }
+
+var busy = false;
+$("go").addEventListener("click", function(){
+  if (busy) return; busy = true;
+  var btn = $("go"); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Проверяю…';
+  $("result").className = "on";
+  browserRes = null; traceData = null; longStat = null;
+  $("answer").className = "card answer v-idle"; $("answer").textContent = "Определяю провайдера и данные узлов…";
+  $("support").textContent = ""; $("support").className = ""; $("routesBody").textContent = "";
+  renderWeb("running");
+  var pending = 2;
+  var finOne = function(){ if (--pending === 0) { busy = false; btn.disabled = false; btn.textContent = "Проверить ещё раз"; } };
+
+  // 1) UDP из браузера (WebRTC/STUN)
+  runBrowserUdp().then(function(br){
+    browserRes = (br && br.results) ? br : null;
+    renderWeb(br);
+    if (me) renderAnswer(me);
+    if (traceData) renderSupport(traceData);
+    if (browserRes && !browserRes.mixed) {
+      fetch("/api/v2/web/report", {method: "POST", headers: {"Content-Type": "application/json", "X-Client": CID},
+        body: JSON.stringify({verdict: browserRes.verdict, results: browserRes.results.map(function(r){ var o = {code: r.code, ok: r.ok, n: r.n, seen: seenKnown(r) ? r.seen : -1}; if (r.pad && r.pad.length) o.pad = r.pad.map(function(p){ return [p.size, p.ok, p.n]; }); return o; })})}).then(function(r){
+          if (r.status === 429) { var nt = el("div", "small muted", "В общую статистику результат этого часа уже передан: лимит защищает её от накруток и общий для вашей сети. Ваш ответ выше от этого не зависит."); nt.style.marginTop = "8px"; $("udpweb").appendChild(nt); }
+        }).catch(function(){});
+    }
+  }).catch(function(){ renderWeb({error: true}); }).then(finOne);
+
+  // 2) данные узлов и трассировка
+  api("GET", "/api/v2/web/me").then(function(r){
+    if (r.status === 200) {
+      me = r.body; renderAnswer(me); renderSupport(traceData || {targets: []});
+      if (me.you && me.you.asn) api("GET", "/api/v2/stats/asn/" + me.you.asn + "?hours=168").then(function(g){
+        if (g.status === 200) { longStat = g.body; renderSupport(traceData || {targets: []}); }
+      });
+    } else { $("answer").textContent = "Не удалось получить данные узлов."; }
+    return api("POST", "/api/v2/web/trace");
+  }).then(function(r){
+    if (r.status === 429) {
+      var old = loadTrace(), mins = Math.max(1, Math.ceil((r.retry || 300) / 60));
+      if (old) { old.stale = true; old.retryMin = mins; renderTraces(old); }
+      else $("routesBody").textContent = "Трассировку можно запускать не чаще раза в 5 минут (общий лимит для вашей сети). Повторите через " + mins + " " + pl(mins, ["минуту", "минуты", "минут"]) + ".";
+      finOne(); return;
+    }
+    if (r.status !== 202) { $("routesBody").textContent = (r.body && r.body.error) || "Не удалось запустить трассировку."; finOne(); return; }
+    var id = r.body.id, tries = 0;
+    renderTraces({targets: r.body.targets.map(function(t){ return {code: t.code, kind: t.kind, name: t.name, status: "pending", results: {}}; })});
+    (function poll(){
+      api("GET", "/api/v2/web/trace/" + id).then(function(g){
+        if (g.status === 200) { renderTraces(g.body); if (g.body.done || ++tries > 50) { if (g.body.done) saveTrace(g.body); finOne(); return; } }
+        else if (++tries > 50) { finOne(); return; }
+        setTimeout(poll, 1200);
+      }).catch(function(){ if (++tries > 50) finOne(); else setTimeout(poll, 1500); });
+    })();
+  }).catch(function(){ $("answer").textContent = "Нет связи с сервером. Проверьте интернет."; finOne(); });
+});
+
+// --- карточки провайдеров и страница провайдера (адрес вида #as29124)
+var PST = {noanchor: ["Нет опорного сервера в стране", "v-idle"], cut: ["Режется", "v-bad"], partial: ["Режется частично", "v-warn"], ok: ["Не режется", "v-ok"], stale: ["Нет свежих данных", "v-idle"]};
+var SPCOL = {noanchor: "var(--muted)", cut: "var(--bad)", partial: "var(--warn)", ok: "var(--muted)", stale: "var(--muted)"};
+var SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs){ var e = document.createElementNS(SVGNS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function initials(name){
+  var w = String(name).replace(/["«»()]/g, "").split(/\s+/).filter(function(x){ return x && !/^(JSC|PJSC|CJSC|OJSC|LLC|OOO|ООО|АО|ПАО|ЗАО)$/i.test(x); });
+  return ((w[0] || "?").charAt(0) + (w[1] ? w[1].charAt(0) : "")).toUpperCase();
+}
+function spark(series, status){
+  var W = 200, H = 38, n = series.length, svg = svgEl("svg", {"viewBox": "0 0 " + W + " " + H, "class": "spark", "preserveAspectRatio": "none"});
+  svg.appendChild(svgEl("line", {x1: 0, y1: H - 1, x2: W, y2: H - 1, stroke: "currentColor", "stroke-opacity": ".3", "vector-effect": "non-scaling-stroke"}));
+  var segs = [], cur = [];
+  series.forEach(function(v, i){
+    if (v === null) { if (cur.length) segs.push(cur); cur = []; return; }
+    cur.push([i / (n - 1) * W, H - 2 - v * (H - 6)]);
+  });
+  if (cur.length) segs.push(cur);
+  segs.forEach(function(sg){
+    if (sg.length === 1) sg = [[sg[0][0] - 2, sg[0][1]], [sg[0][0] + 2, sg[0][1]]];
+    var d = sg.map(function(pt, i){ return (i ? "L" : "M") + pt[0].toFixed(1) + " " + pt[1].toFixed(1); }).join(" ");
+    svg.appendChild(svgEl("path", {d: d + " L" + sg[sg.length - 1][0].toFixed(1) + " " + (H - 1) + " L" + sg[0][0].toFixed(1) + " " + (H - 1) + " Z", fill: SPCOL[status], "fill-opacity": ".15"}));
+    svg.appendChild(svgEl("path", {d: d, fill: "none", stroke: SPCOL[status], "stroke-width": "1.6", "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round"}));
+  });
+  return svg;
+}
+function avatar(pv){
+  function letters(){ var d = el("div", "pav", initials(pv.name)); d.style.background = "hsl(" + hue(pv.asn) + " 50% 40%)"; return d; }
+  if (!pv.logo) return letters();
+  var im = el("img", "pav logo"); im.alt = ""; im.loading = "lazy"; im.src = pv.logo;
+  im.onerror = function(){ if (im.parentNode) im.parentNode.replaceChild(letters(), im); };
+  return im;
+}
+function provCard(pv){
+  var a = el("a", "pcard st-" + pv.status); a.href = "/as" + pv.asn;
+  var head = el("div", "phead"), av = avatar(pv);
+  var tx = el("div"); tx.appendChild(el("div", "pname", pv.name)); tx.appendChild(el("div", "pst " + pv.status, "● " + PST[pv.status][0] + (pv.old ? " (давно)" : "")));
+  head.appendChild(av); head.appendChild(tx); a.appendChild(head);
+  a.appendChild(spark(pv.series, pv.status));
+  if (pv.size_cut) a.appendChild(el("div", "pfoot sz", "⚠ длинные UDP-пакеты не проходят"));
+  a.appendChild(el("div", "pfoot", "за час: " + pv.rounds_1h + ";  сутки: " + pv.rounds_24h + (pv.web_24h ? " (из них посетителей: " + pv.web_24h + ")" : "") + (pv.asns ? ";  сетей оператора: " + pv.asns.length : "") + (pv.old ? ";  последний замер " + ago(pv.last_age) : (pv.weak ? ";  мало данных" : ""))));
+  return a;
+}
+var JST = {cut: "режется", partial: "режется частично", ok: "не режется", stale: "нет свежих данных", noanchor: "нет опорного сервера в стране"};
+function fmtTs(t){ var d = new Date(t * 1000); return p2(d.getDate()) + "." + p2(d.getMonth() + 1) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes()); }
+function jText(e){
+  var i = e.info || {}, ev = (i.checks ? " (проверок за 6 часов: " + i.checks + (i.browsers ? ", браузеров: " + i.browsers : "") + ")" : "");
+  if (e.kind === "new") return "впервые в проверках: " + JST[e.new] + ev;
+  if (e.kind === "change") return JST[e.old] + " → " + JST[e.new] + ev;
+  if (e.kind === "cut_check") {
+    var d = String(i.dir || "in").split("+"), out = d.indexOf("out") >= 0, inn = d.indexOf("in") >= 0;
+    var tx = (i.browsers ? "у посетителей (" + i.browsers + ") этой сети " : "у одного посетителя этой сети ");
+    if (inn) tx += "входящий UDP из-за рубежа не доходит (из России доходит)" + (i.servers_replied ? ". Исходящий уходит: зарубежные серверы получили запросы и отправили ответы (серверов: " + i.servers_replied + ")" : "");
+    if (inn && out) tx += ". ";
+    if (out) tx += "исходящий UDP за рубеж не уходит: зарубежные серверы запросов не получили";
+    return tx + ". Причина может быть у провайдера или у самих посетителей" + (e.old ? " (до этого: " + JST[e.old] + ")" : "");
+  }
+  if (e.kind === "size_cut") return "у посетителей (" + (i.browsers || 2) + ") этой сети короткие UDP-пакеты проходят, а длинные (" + (i.size || 1200) + " байт) нет. Возможно, режут по размеру пакета";
+  return e.kind;
+}
+function loadJournal(){
+  api("GET", "/api/v2/journal").then(function(r){
+    var box = $("jlist"); box.innerHTML = "";
+    if (r.status !== 200) { box.textContent = "Не удалось загрузить журнал."; return; }
+    var ev = r.body.events || [];
+    if (!ev.length) { box.textContent = "Пока записей нет."; return; }
+    ev.slice(0, 40).forEach(function(e){
+      var row = el("div"); row.style.padding = "6px 0"; row.style.borderBottom = "1px solid var(--line)";
+      var who = el("a", null, e.name); who.href = "/as" + e.asn; who.style.fontWeight = "600";
+      var t = el("span", "muted", fmtTs(e.ts) + " · "); row.appendChild(t); row.appendChild(who); row.appendChild(document.createTextNode(": " + jText(e)));
+      box.appendChild(row);
+    });
+  }).catch(function(){ $("jlist").textContent = "Не удалось загрузить журнал."; });
+}
+var PROV = [], PAGE = 12, pshown = PAGE;
+function renderProviders(){
+  var q = ($("psearch").value || "").trim().toLowerCase().replace(/^as\s+(?=\d)/, "as");
+  var g = $("pgrid"), more = $("pmore"); g.innerHTML = ""; more.innerHTML = ""; more.hidden = true;
+  var list = q ? PROV.filter(function(p){ return p.search.indexOf(q) >= 0; }) : PROV.filter(function(p){ return p.kind !== "hosting"; });
+  var hosts = q ? [] : PROV.filter(function(p){ return p.kind === "hosting"; });
+  var g2 = $("pgrid2"); g2.innerHTML = ""; $("hostbox").hidden = !hosts.length; $("hostcount").textContent = hosts.length;
+  hosts.forEach(function(pv){ g2.appendChild(provCard(pv)); });
+  if (!list.length) { g.appendChild(el("div", "muted small", q ? "Ничего не найдено. Если вашего провайдера нет в списке, нажмите «Проверить мою сеть»: он появится после проверки." : "Пока нет данных. Нажмите «Проверить мою сеть» или подключите узел, и ваш провайдер появится здесь.")); return; }
+  var urgent = list.filter(function(p){ return p.status === "cut" || p.status === "partial"; }).length;
+  var limit = Math.max(pshown, urgent);          // порезки показываем всегда, остальное по страницам
+  list.slice(0, limit).forEach(function(pv){ g.appendChild(provCard(pv)); });
+  if (list.length > limit) {
+    var rest = list.length - limit, bt = el("button", "btn ghost more", "Показать ещё ↓"); bt.type = "button";
+    bt.appendChild(el("span", "cnt", String(Math.min(rest, 24)) + " из " + rest));
+    bt.addEventListener("click", function(){ pshown += 24; renderProviders(); });
+    more.appendChild(bt); more.hidden = false;
+  }
+}
+function loadProviders(){
+  api("GET", "/api/v2/providers").then(function(r){
+    if (r.status !== 200) { var g = $("pgrid"); g.innerHTML = ""; g.appendChild(el("div", "err small", "Не удалось загрузить данные.")); return; }
+    PROV = r.body.providers || []; renderProviders();
+  }).catch(function(){ $("pgrid").innerHTML = ""; $("pgrid").appendChild(el("div", "err small", "Не удалось загрузить данные.")); });
+}
+$("psearch").addEventListener("input", function(){ pshown = PAGE; renderProviders(); });
+
+var TST = {OK: ["чисто", "var(--ok)"], INCUT: ["ответы не приходят", "var(--bad)"], OUTCUT: ["до сервера не доходит", "var(--bad)"], PART: ["на части портов", "var(--warn)"],
+           MIXED: ["смешанно", "var(--warn)"], LOSSY: ["с потерями", "var(--warn)"], NOREPORT: ["нет данных", "var(--idle)"]};
+function timeline(series, hours){
+  var data = series.slice(-hours), n = data.length, svg = svgEl("svg", {"viewBox": "0 0 " + n + " 40", "class": "tl", "preserveAspectRatio": "none"});
+  data.forEach(function(b, i){
+    var tot = b[0] + b[1];
+    if (tot > 0) {
+      svg.appendChild(svgEl("rect", {x: i + .05, y: 0, width: .9, height: 40, fill: "var(--ok)", "fill-opacity": ".35"}));
+      var h = 40 * b[0] / tot;
+      if (h > 0) svg.appendChild(svgEl("rect", {x: i + .05, y: 40 - h, width: .9, height: h, fill: "var(--bad)"}));
+    } else if (b[2] > 0) svg.appendChild(svgEl("rect", {x: i + .05, y: 0, width: .9, height: 40, fill: "var(--idle)", "fill-opacity": ".35"}));
+  });
+  return svg;
+}
+function showProvider(asn){
+  var box = $("provider"); box.innerHTML = "";
+  var back = el("a", "btn ghost", "← Все провайдеры"); back.href = "/"; box.appendChild(back);
+  box.appendChild(el("div", "muted small", "Загружаю…"));
+  api("GET", "/api/v2/providers/" + asn).then(function(r){
+    box.innerHTML = ""; box.appendChild(back);
+    if (r.status !== 200) { box.appendChild(el("div", "err", r.status === 404 ? "По этой сети пока нет данных." : "Не удалось загрузить данные.")); return; }
+    var d = r.body; document.title = d.name + ": режет ли UDP | UDPcheck";
+    var card = el("div", "card");
+    var hh = el("div", "phead"); if (d.logo || true) { hh.appendChild(avatar({asn: d.asn, name: d.name, logo: d.logo})); }
+    var h = el("h2", null, d.name); h.style.margin = "0"; hh.appendChild(h); hh.style.marginBottom = "6px"; card.appendChild(hh);
+    card.appendChild(el("div", "muted small", (d.asns ? "Сети оператора: " + d.asns.map(function(x){ return "AS" + x; }).join(", ") : "AS" + d.asn) + (d.country ? " · " + cname(d.country) : "") + (d.org && d.org !== d.name ? " · " + d.org : "")));
+    var st = el("div"); st.style.margin = "10px 0";
+    st.appendChild(el("span", "badge " + PST[d.status][1], PST[d.status][0]));
+    if (d.kind === "hosting") st.appendChild(el("span", "tag", "хостинг или VPN, не обычный провайдер"));
+    if (d.old) st.appendChild(el("span", "tag", "данные устарели: замеров за последние 6 часов нет"));
+    if (d.weak) st.appendChild(el("span", "tag", "мало данных: нужно хотя бы 5 замеров или проверок"));
+    card.appendChild(st);
+    if (d.size && d.size.tested) {
+      var bad = d.size.cut * 2 >= d.size.tested && d.size.cut >= 2;
+      var sl = el("div", "small", bad ? "Длинные UDP-пакеты (до " + d.size.max + " байт) не доходят у " + d.size.cut + " из " + d.size.tested + " посетителей за сутки, а короткие доходят. Возможно, режут по размеру пакета."
+                                      : "Длинные UDP-пакеты (до 1200 байт) доходят: проверено у " + d.size.tested + " " + pl(d.size.tested, ["посетителя", "посетителей", "посетителей"]) + " за сутки.");
+      if (bad) sl.style.color = "var(--warn)"; sl.style.margin = "6px 0 2px"; card.appendChild(sl);
+    }
+    var ps = el("div", "pstat");
+    [["за час", d.rounds_1h], ["за сутки", d.rounds_24h], ["за 7 суток", d.rounds_7d], ["узлов за сутки", d.nodes], ["проверок посетителей за сутки", d.web_24h]].forEach(function(x){ ps.appendChild(el("span", null, x[0] + ": " + x[1])); });
+    ps.appendChild(el("span", null, "последний замер: " + ago(d.last_age)));
+    card.appendChild(ps);
+    var top = null, topN = 0, v;
+    for (v in d.verdicts) if (d.verdicts[v] > topN) { top = v; topN = d.verdicts[v]; }
+    var info = top && VERD[top];
+    if (info) {
+      var tcpAll = 0, tcpOk = 0;
+      d.targets.forEach(function(t){ if (!isHome(t.kind)) { tcpAll += t.tcp_total; tcpOk += t.tcp_ok; } });
+      var txt = info.line + ". " + info.what + ((top === "FOREIGN_IN_CUT" && tcpAll >= 3 && tcpOk / tcpAll >= 0.9) ? " TCP до тех же серверов при этом проходит: не работает именно UDP." : "");
+      var sm = el("div", "small"); sm.style.marginTop = "12px"; sm.textContent = "Типичный итог за сутки (" + topN + " из " + d.rounds_24h + " замеров): " + txt; card.appendChild(sm);
+    }
+    box.appendChild(card);
+
+    var c2 = el("div", "card"); c2.style.marginTop = "12px";
+    c2.appendChild(el("h3", null, "Как менялась картина"));
+    c2.appendChild(el("div", "small muted", "Каждый столбик час. Красная часть: доля замеров, где UDP из-за рубежа не проходит; зелёная: проходит; серая: замеры ненадёжны."));
+    var seg = el("div", "seg"), holder = el("div"), axis = el("div", "tl-axis");
+    function draw(hrs){
+      holder.innerHTML = ""; holder.appendChild(timeline(d.series, hrs)); axis.innerHTML = "";
+      axis.appendChild(el("span", null, hrs === 24 ? "24 часа назад" : "7 суток назад")); axis.appendChild(el("span", null, "сейчас"));
+      Array.prototype.forEach.call(seg.children, function(b){ b.className = (+b.getAttribute("data-h") === hrs) ? "on" : ""; });
+    }
+    [[24, "24 часа"], [168, "7 суток"]].forEach(function(x){ var b = el("button", null, x[1]); b.type = "button"; b.setAttribute("data-h", x[0]); b.addEventListener("click", function(){ draw(x[0]); }); seg.appendChild(b); });
+    c2.appendChild(seg); c2.appendChild(holder); c2.appendChild(axis); draw(24);
+    box.appendChild(c2);
+
+    if ((d.journal || []).length) {
+      var cj = el("div", "card"); cj.style.marginTop = "12px"; cj.appendChild(el("h3", null, "История статуса"));
+      d.journal.forEach(function(e){ var row = el("div", "small"); row.style.padding = "4px 0"; row.textContent = fmtTs(e.ts) + " · " + jText(e); cj.appendChild(row); });
+      box.appendChild(cj);
+    }
+    var c3 = el("div", "card"); c3.style.marginTop = "12px";
+    c3.appendChild(el("h3", null, "До каких серверов доходит UDP (за сутки)"));
+    if (!d.targets.length) c3.appendChild(el("div", "muted small", "Пока нет данных."));
+    d.targets.forEach(function(t){
+      var row = el("div", "trow"), tot = 0, k;
+      for (k in t.status) tot += t.status[k];
+      row.appendChild(el("div", "nm", t.name + (isHome(t.kind) ? " (контроль: та же страна, что у провайдера)" : "")));
+      var bar = el("div", "bar"), legend = [];
+      Object.keys(t.status).sort().forEach(function(k2){
+        var i = el("i"); i.style.width = (t.status[k2] * 100 / tot) + "%"; i.style.background = (TST[k2] || TST.NOREPORT)[1]; bar.appendChild(i);
+        legend.push((TST[k2] || TST.NOREPORT)[0] + " " + t.status[k2]);
+      });
+      row.appendChild(bar);
+      row.appendChild(el("div", "small muted", legend.join(" · ") + (t.tcp_total ? " · TCP: " + t.tcp_ok + " из " + t.tcp_total : "")));
+      c3.appendChild(row);
+    });
+    box.appendChild(c3);
+
+    var c4 = el("div", "card"); c4.style.marginTop = "12px";
+    c4.appendChild(el("h3", null, "Где замолкают маршруты (за 7 суток)"));
+    var any = false;
+    [["foreign", "из-за рубежа"], ["home", "из страны провайдера"]].forEach(function(k){
+      var arr = (d.cuts && d.cuts[k[0]]) || []; if (!arr.length) return; any = true;
+      var line = el("div", "cutline"); line.appendChild(el("span", "k", k[1]));
+      arr.forEach(function(x){ line.appendChild(chip({asn: x.asn, org: x.org}, "× " + x.n)); });
+      c4.appendChild(line);
+    });
+    if (!any) c4.appendChild(el("div", "muted small", "Трассировок пока нет."));
+    c4.appendChild(el("div", "small muted", "Обрыв в трассировке не доказывает, что режет именно эта сеть: домашнее и пограничное оборудование часто не отвечает на трассировку. Если маршруты из страны провайдера замолкают там же, это нормально."));
+    box.appendChild(c4);
+
+    var c5 = el("div", "card"); c5.style.marginTop = "12px";
+    c5.appendChild(el("h3", null, "Узлы в этой сети"));
+    var ng = el("div", "pstat");
+    (d.node_list || []).forEach(function(n){ var sp = el("span"); sp.appendChild(el("span", "dot" + (n.online ? " on" : ""))); sp.appendChild(document.createTextNode(n.callsign + " · " + n.os)); ng.appendChild(sp); });
+    if (!(d.node_list || []).length) ng.appendChild(el("span", null, "сейчас нет узлов на связи"));
+    c5.appendChild(ng);
+    var wb = d.web || {}, wn = 0, wc = 0, kk; for (kk in wb) { wn += wb[kk]; if (kk !== "NO_BLOCK") wc += wb[kk]; }
+    if (wn) c5.appendChild(el("div", "small muted", "Проверок из браузера посетителей за сутки: " + wn + ", из них с блокировкой: " + wc + "."));
+    box.appendChild(c5);
+    var cta = el("a", "btn", "Вы в этой сети? Проверить своё подключение"); cta.href = "/"; cta.style.marginTop = "16px"; box.appendChild(cta);
+  }).catch(function(){ box.appendChild(el("div", "err", "Нет связи с сервером.")); });
+}
+function route(){
+  var m = /^\/as(\d{1,10})\/?$/.exec(location.pathname);
+  document.body.classList.toggle("detail", !!m);
+  if (m) { showProvider(m[1]); window.scrollTo(0, 0); }
+  else document.title = "UDPcheck: режет ли провайдер UDP";
+}
+function go(url){ history.pushState(null, "", url); route(); }
+// переходы внутри страницы без перезагрузки; обычные ссылки (в новой вкладке и т. п.) работают как есть
+document.addEventListener("click", function(e){
+  var a = e.target.closest ? e.target.closest("a") : null;
+  if (!a || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || a.target || a.origin !== location.origin) return;
+  if (/^\/(as\d{1,10})?\/?$/.test(a.pathname) && !a.hash) {
+    e.preventDefault();
+    if (a.pathname !== location.pathname) go(a.pathname);
+    if (/^\/\/?$/.test(a.pathname)) {                 // на главную (логотип, «назад», кнопка внизу страницы провайдера): наверх и обновить списки
+      window.scrollTo(0, 0);
+      loadProviders(); loadNodes();
+    }
+    if (a.blur) a.blur();
+  }
+});
+window.addEventListener("popstate", route);
+// Открытая вкладка со старой версией: сверяем метку версии с сервером; если проверка не идёт, обновляем сама, иначе предлагаем кнопку
+function checkVersion(){
+  if (BUILD.indexOf("__") === 0) return;
+  api("GET", "/api/v2/version").then(function(r){
+    if (r.status !== 200 || !r.body.site || r.body.site === BUILD) return;
+    var idle = !busy && !browserRes, stamp = "udpc_reload";
+    if (idle) {
+      var last = 0; try { last = +sessionStorage.getItem(stamp) || 0; } catch(e){}
+      if (Date.now() - last > 120000) { try { sessionStorage.setItem(stamp, String(Date.now())); } catch(e){} location.reload(); return; }
+    }
+    $("newver").hidden = false;
+  }).catch(function(){});
+}
+$("newverBtn").addEventListener("click", function(){ location.reload(); });
+setTimeout(checkVersion, 8000);
+setInterval(checkVersion, 600000);
+document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "visible") checkVersion(); });
+loadJournal();
+if (/^#as\d{1,10}$/.test(location.hash)) history.replaceState(null, "", "/" + location.hash.slice(1));   // старые ссылки вида /#as29124
+loadProviders();
+route();
+
+// --- список узлов
+function loadNodes(){
+  api("GET", "/api/v2/nodes").then(function(r){
+    var sum = $("nodesSummary"), grid = $("nodesGrid"), anc = $("anchors"), rsum = $("refsSummary"), rgrid = $("refsGrid"); grid.innerHTML = ""; rgrid.innerHTML = ""; anc.innerHTML = "";
+    if (r.status !== 200) { sum.textContent = "Не удалось загрузить список узлов."; return; }
+    var d = r.body;
+    var byc = {}, order = [];
+    (d.anchors || []).forEach(function(a){ var k = a.country || "?"; if (!byc[k]) { byc[k] = []; order.push(k); } byc[k].push(a); });
+    order.forEach(function(k){
+      var g = el("div", "agroup"); g.appendChild(el("div", "small muted", (k === "?" ? "Страна не определена" : cname(k)) + ": " + byc[k].length + " " + pl(byc[k].length, ["сервер", "сервера", "серверов"])));
+      var row = el("div", "anchors");
+      byc[k].forEach(function(a){
+        var x = el("div", "anchor"), nm = el("b"); nm.appendChild(el("span", "dot" + (a.online ? " on" : ""))); nm.appendChild(document.createTextNode(a.name)); x.appendChild(nm);
+        x.appendChild(el("small", null, (a.online ? "активен" : "не отвечает хабу") + (a.checks ? " · проверок посетителей за сутки: " + a.checks + ", ответил: " + a.ok : "")));
+        row.appendChild(x);
+      });
+      g.appendChild(row); anc.appendChild(g);
+    });
+    var all = d.nodes || [], nodes = all.filter(function(n){ return n.role !== "ref"; }), refs = all.filter(function(n){ return n.role === "ref" || n.role === "both"; });
+    var nOn = nodes.filter(function(n){ return n.online; }).length;
+    sum.textContent = nodes.length ? "Узлов в сети: " + nodes.length + ", сейчас на связи: " + nOn + "." : "Пока ни одного узла. Станьте первым: команда ниже.";
+    rsum.textContent = refs.length ? "Серверов добровольцев: " + refs.length + ", активных: " + refs.filter(function(n){ return n.ref && n.ref.active; }).length + "." : "Пока нет. Добавьте сервер: команда ниже.";
+    function card(n, isRef){
+      var c = el("div", "node" + (n.online ? "" : " off"));
+      var t = el("b"); var dot = el("span", "dot" + (n.online ? " on" : "")); t.appendChild(dot); t.appendChild(document.createTextNode(n.callsign));
+      if (isRef) t.appendChild(el("span", "tag" + (n.ref && n.ref.active ? " on" : ""), n.ref && n.ref.active ? "активен" : "не активен"));
+      if (n.outdated) { var ot = el("span", "tag", "есть новая версия агента"); ot.title = "Обновить можно той же командой установки. Старая версия продолжит работать."; t.appendChild(ot); }
+      c.appendChild(t);
+      if (n.role === "node") c.appendChild(el("div", "m2", (n.asn ? "AS" + n.asn + " " : "") + (n.org || "провайдер не определён") + (n.country ? " · " + cname(n.country) : "")));
+      else c.appendChild(el("div", "m2", [n.city, n.country ? cname(n.country) : ""].filter(Boolean).join(", ") || "место не определено"));
+      if (isRef) {
+        c.appendChild(el("div", "m2", n.os + " · " + (n.online ? "на связи" : "не на связи") + (n.ref && n.ref.checks ? " · проверок за сутки " + n.ref.checks + ", чисто " + n.ref.ok : "")));
+      } else {
+        var info = n.os + " · " + (n.online ? "на связи" : "не на связи") + " · замеров: " + n.rounds + (n.tunnel_rounds ? " (ещё " + n.tunnel_rounds + " отбраковано из-за прокси)" : "");
+        c.appendChild(el("div", "m2", info));
+        if (n.last_verdict && VERD[n.last_verdict]) { var b = el("span", "badge " + VERD[n.last_verdict].cls, VERD[n.last_verdict].big); b.style.marginTop = "6px"; c.appendChild(b); }
+      }
+      return c;
+    }
+    nodes.forEach(function(n){ grid.appendChild(card(n, false)); });
+    refs.forEach(function(n){ rgrid.appendChild(card(n, true)); });
+  }).catch(function(){ $("nodesSummary").textContent = "Не удалось загрузить список узлов."; });
+}
+loadNodes();
+
+// --- копирование команд
+Array.prototype.forEach.call(document.querySelectorAll("button.copy[data-for]"), function(b){
+  b.addEventListener("click", function(){
+    var t = $(b.getAttribute("data-for")).textContent;
+    var done = function(){ b.textContent = "Скопировано"; setTimeout(function(){ b.textContent = "Скопировать"; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function(){});
+    else { var ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch(e){} document.body.removeChild(ta); }
+  });
+});
+})();
+</script>
+</body>
+</html>

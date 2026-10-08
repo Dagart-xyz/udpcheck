@@ -1,0 +1,450 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# udpcheck-node: установщик узла сети проверок UDP (Linux с systemd). Источник: https://dagart.xyz
+#
+#   Установка (одна строка для любого Linux и роутера OpenWrt, сама выберет curl или wget и sudo):
+#     (curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh
+#   Удаление:
+#     (curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh -s -- uninstall
+#
+# Что делает: ставит Python 3 (если нет), скачивает агент, проверяет SHA-256, создаёт службу udpcheck-node,
+# которая работает под временным пользователем без прав (systemd DynamicUser). Агент ходит наружу: на хаб по HTTPS
+# и на серверы проекта по UDP/TCP. Домен и сертификат не нужны.
+# Роль выбирается сама: у машины публичный IPv4 (VPS, сервер) -> ОПОРНЫЙ СЕРВЕР: отвечает на проверки других узлов по заданиям
+# хаба (нужно открыть UDP 47321, 47322 и TCP 47321; хаб сам проверит доступность). Домашний ПК, роутер, машина за NAT -> УЗЕЛ:
+# сама проверяет вашу сеть. Другая роль: UDPCHECK_ROLE=node|ref|both перед sh:  ... | UDPCHECK_ROLE=node sh
+# Фаервол, SSH и остальные службы установщик не затрагивает: порты для опорной роли вы открываете сами.
+set -eu
+
+HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
+ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (проверяет свою сеть) | ref (опорный сервер) | both
+if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # старая переменная: REF=0 означало «только узел»
+AGENT_SHA256="@@SHA256@@"
+DIR=/opt/udpcheck-node
+STATE=/var/lib/udpcheck-node
+SVC=udpcheck-node
+UNIT="/etc/systemd/system/${SVC}.service"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
+
+# fetch URL ФАЙЛ [ТАЙМАУТ]: скачивает через curl, а если его нет, через wget (на чистом Debian curl может не быть)
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time "${3:-60}" "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T "${3:-60}" -O "$2" "$1"
+  else
+    return 1
+  fi
+}
+
+[ "$(uname -s)" = Linux ] || die "установщик работает только на Linux (на macOS и Windows запустите агент вручную: скачайте $HUB/node/udpcheck_node.py и выполните python3 udpcheck_node.py)"
+
+if [ "$(id -u)" -ne 0 ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    say "Нужны права root: перезапускаю установщик через sudo..."
+    SELF="$(mktemp)"
+    fetch "$HUB/install-node.sh" "$SELF" 30 || die "не удалось повторно скачать установщик"
+    exec sudo env UDPCHECK_YES="${UDPCHECK_YES:-0}" UDPCHECK_HUB="$HUB" UDPCHECK_ROLE="$ROLE" UDPCHECK_OPEN_FW="${UDPCHECK_OPEN_FW:-}" sh -c 'f="$1"; shift; sh "$f" "$@"; r=$?; rm -f "$f"; exit $r' _ "$SELF" "$@"
+  fi
+  die "нужны права root, а sudo не найден. Войдите как root (su -) и повторите ту же команду."
+fi
+
+ACTION="${1:-install}"
+
+# OpenWrt (роутеры GL.iNet и др.): служба через procd, пакеты через opkg
+OPENWRT=0
+if [ -f /etc/openwrt_release ] && [ -x /sbin/procd ]; then OPENWRT=1; fi
+
+ROLE_WHY="роль задана вручную"
+
+# auto: публичный IPv4 у самой машины -> опорный сервер, иначе узел (роутер OpenWrt и домашняя сеть считаются узлом)
+detect_role() {
+  case "$ROLE" in node|ref|both) return 0 ;; auto) ;; *) die "неизвестная роль '$ROLE' (допустимо: auto, node, ref, both)" ;; esac
+  ROLE=node
+  ROLE_WHY="домашняя сеть, роутер или машина за NAT"
+  [ "$OPENWRT" = 1 ] && return 0
+  DT="$(mktemp)"
+  if fetch "$HUB/api/v2/ip" "$DT" 15 2>/dev/null; then
+    PUB="$(sed -n 's/.*"ip": *"\([0-9.]*\)".*/\1/p' "$DT" | head -n1)"
+    LOC="$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1; hostname -I 2>/dev/null | tr ' ' '\n')"
+    if [ -n "$PUB" ] && printf '%s\n' "$LOC" | grep -qx "$PUB"; then
+      ROLE=ref
+      ROLE_WHY="у машины публичный IPv4, это сервер"
+    fi
+  fi
+  rm -f "$DT"
+}
+
+FW_PORTS_UDP="47321 47322"
+FW_PORTS_TCP="47321"
+
+# какой фаервол включён на этой машине (ufw, firewalld, iptables, nftables); облачный фаервол хостера отсюда не виден
+detect_fw() {
+  FW=""
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -n1 | grep -qx 'Status: active'; then FW=ufw
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -qi running; then FW=firewalld
+  elif command -v iptables >/dev/null 2>&1 && iptables -S INPUT 2>/dev/null | grep -qE '^-P INPUT (DROP|REJECT)|-j (DROP|REJECT)'; then FW=iptables
+  elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q 'policy drop'; then FW=nft
+  fi
+}
+
+# команды, которые открывают наши порты в найденном фаерволе
+fw_cmds() {
+  case "$FW" in
+    ufw)
+      for p in $FW_PORTS_UDP; do echo "ufw allow $p/udp"; done
+      for p in $FW_PORTS_TCP; do echo "ufw allow $p/tcp"; done ;;
+    firewalld)
+      echo "firewall-cmd --permanent $(for p in $FW_PORTS_UDP; do printf -- '--add-port=%s/udp ' "$p"; done)$(for p in $FW_PORTS_TCP; do printf -- '--add-port=%s/tcp ' "$p"; done)"
+      echo "firewall-cmd --reload" ;;
+    iptables)
+      for p in $FW_PORTS_UDP; do echo "iptables -I INPUT -p udp --dport $p -j ACCEPT"; done
+      for p in $FW_PORTS_TCP; do echo "iptables -I INPUT -p tcp --dport $p -j ACCEPT"; done ;;
+    nft)
+      echo "nft insert rule inet filter input udp dport { 47321, 47322 } accept   # имя таблицы и цепочки у вас может быть другим"
+      echo "nft insert rule inet filter input tcp dport 47321 accept" ;;
+  esac
+}
+
+# Хаб не достучался до портов опорного сервера: смотрим, что не так на машине, и предлагаем открыть порты (только с согласия)
+fw_help() {
+  say ""
+  say "Хаб не смог достучаться до портов опорного сервера снаружи (нужны UDP 47321, 47322 и TCP 47321)."
+  if command -v ss >/dev/null 2>&1; then
+    LISTEN="$(ss -uln 2>/dev/null | awk 'NR>1{print $4}' | tr '\n' ' ')"
+    for p in $FW_PORTS_UDP; do
+      case " $LISTEN" in
+        *":$p "*) ;;
+        *) say "  UDP $p: на этой машине его никто не слушает (занят другой программой?). Посмотреть: ss -ulnp | grep $p" ;;
+      esac
+    done
+  fi
+  detect_fw
+  if [ -z "$FW" ]; then
+    say "  На самой машине включённого фаервола не видно (ufw, firewalld, iptables, nftables)."
+    say "  Значит, порты закрыты снаружи: в панели хостера (фаервол или группы безопасности) либо за NAT. Откройте UDP 47321, 47322 и TCP 47321 там,"
+    say "  затем: systemctl restart $SVC"
+    return 0
+  fi
+  say "  Найден фаервол: $FW. Не открыты, судя по проверке хаба: UDP 47321, UDP 47322, TCP 47321."
+  say "  Чтобы открыть, нужно выполнить:"
+  fw_cmds | while read -r c; do say "    $c"; done
+  ANS=n
+  if [ "${UDPCHECK_OPEN_FW:-}" = 1 ]; then ANS=y
+  elif [ "${UDPCHECK_OPEN_FW:-}" = 0 ] || [ "${UDPCHECK_YES:-0}" = 1 ] || [ ! -r /dev/tty ]; then ANS=n
+  else
+    printf '  Выполнить эти команды сейчас? [y/N] '
+    read -r ANS < /dev/tty || ANS=n
+  fi
+  case "$ANS" in
+    y|Y|д|Д) ;;
+    *) say "  Ничего не меняю. Выполните команды сами, затем: systemctl restart $SVC"; return 0 ;;
+  esac
+  if [ "$FW" = nft ]; then
+    say "  Для nftables сам не открываю: имена таблиц у каждого свои, подставьте их в команды выше и выполните вручную."
+    return 0
+  fi
+  fw_cmds | while read -r c; do
+    say "  выполняю: $c"
+    sh -c "$c" >/dev/null 2>&1 || say "  не удалось: $c"
+  done
+  [ "$FW" = iptables ] && say "  Правила iptables не переживут перезагрузку, сохраните их (netfilter-persistent save или iptables-save)."
+  TS="$(date '+%Y-%m-%d %H:%M:%S')"
+  systemctl restart "$SVC"
+  i=0; RL2=""
+  while [ "$i" -lt 25 ] && [ -z "$RL2" ]; do
+    sleep 1
+    RL2="$(journalctl -u "$SVC" --no-pager -o cat --since "$TS" 2>/dev/null | grep 'Опорная роль' | tail -1 || true)"
+    i=$((i + 1))
+  done
+  if [ -n "$RL2" ]; then say "  $RL2"; else say "  Результат проверки пока не вижу: journalctl -u $SVC -n 20"; fi
+  return 0
+}
+
+say_role_notice() {
+  case "$ROLE" in
+    node)
+      say "Роль: УЗЕЛ ($ROLE_WHY)."
+      say "  Агент раз в ~15 минут получает от хаба задание, шлёт UDP на опорные серверы и присылает счётчики."
+      say "  Хаб видит IP на время запроса и определяет провайдера по ASN. IP в базу не записывается и другим не выдаётся. Открывать порты не нужно." ;;
+    ref)
+      say "Роль: ОПОРНЫЙ СЕРВЕР ($ROLE_WHY)."
+      say "  Машина будет отвечать на проверки других узлов по заданиям хаба, сама ничего не проверяет."
+      say "  Её IP узнают хаб, узлы сети и браузеры посетителей сайта, которых она участвует проверять (как любой STUN-сервер);"
+      say "  сервер увидит их IP. Трассировки до посетителей ей не передаются."
+      say "  Откройте в фаерволе UDP 47321, 47322 и TCP 47321 (сам фаервол установщик не меняет; если порты окажутся закрыты, он предложит открыть их и спросит согласия), иначе сервер останется неактивным." ;;
+    both)
+      say "Роль: УЗЕЛ И ОПОРНЫЙ СЕРВЕР ($ROLE_WHY)."
+      say "  Агент проверяет вашу сеть и ещё отвечает на проверки других узлов. IP узнают хаб и узлы, которым хаб назначит этот сервер."
+      say "  Откройте в фаерволе UDP 47321, 47322 и TCP 47321 (сам фаервол установщик не меняет; если порты окажутся закрыты, он предложит открыть их и спросит согласия)." ;;
+  esac
+  say "  Другая роль: UDPCHECK_ROLE=node, ref или both перед sh."
+}
+
+# Скачивание через Python (на OpenWrt wget без библиотеки libustream не умеет HTTPS, а Python с openssl уже поставлен)
+pyfetch() {
+  python3 -c 'import sys,urllib.request; open(sys.argv[2],"wb").write(urllib.request.urlopen(sys.argv[1], timeout=int(sys.argv[3])).read())' "$1" "$2" "${3:-60}"
+}
+
+openwrt_install() {
+  say "udpcheck-node: подключение этого роутера к сети проверок UDP (OpenWrt)"
+  say ""
+  say "Будет сделано:"
+  say "  1. через менеджер пакетов OpenWrt (apk или opkg) установлен Python 3 и нужные модули (около 30 МБ на флеш-памяти);"
+  say "  2. агент скачан с $HUB/node/udpcheck_node.py, проверена контрольная сумма SHA-256;"
+  say "  3. создана служба udpcheck-node (procd): запускается от пользователя nobody, только исходящие соединения."
+  detect_role
+  say_role_notice
+  say ""
+  FREE="$(df -k /overlay 2>/dev/null | awk 'NR==2{print $4}')"
+  [ -n "$FREE" ] || FREE="$(df -k / | awk 'NR==2{print $4}')"
+  if [ "$FREE" -lt 40000 ] 2>/dev/null; then
+    die "мало места: свободно около $((FREE / 1024)) МБ, нужно хотя бы 40 МБ. Освободите место или подключите USB-накопитель (extroot)."
+  fi
+  if [ "${UDPCHECK_YES:-0}" != 1 ]; then
+    say "Начало через 5 секунд. Отмена: Ctrl+C."
+    sleep 5
+  fi
+  say "Обновляю список пакетов и ставлю Python (это может занять несколько минут)..."
+  PYPKGS="python3-light python3-urllib python3-openssl python3-codecs ca-bundle"
+  if command -v apk >/dev/null 2>&1; then
+    # OpenWrt 25.12 и новее
+    apk update >/dev/null 2>&1 || die "apk update не сработал: проверьте интернет и время на роутере"
+    apk add $PYPKGS >/dev/null 2>&1 || die "не удалось установить пакеты Python через apk"
+  elif command -v opkg >/dev/null 2>&1; then
+    # OpenWrt 24.10 и старше
+    opkg update >/dev/null 2>&1 || die "opkg update не сработал: проверьте интернет и время на роутере"
+    opkg install $PYPKGS >/dev/null 2>&1 || die "не удалось установить пакеты Python через opkg"
+  else
+    die "не найден менеджер пакетов (apk или opkg)"
+  fi
+  command -v python3 >/dev/null 2>&1 || die "после установки python3 не найден"
+  say "Проверяю доступность хаба..."
+  pyfetch "$HUB/api/v2/stats?hours=1" /dev/null 20 || die "хаб $HUB недоступен с роутера (нужен исходящий HTTPS и правильное время на роутере)"
+  TMP="$(mktemp)"
+  trap 'rm -f "$TMP"' EXIT
+  say "Скачиваю агент..."
+  pyfetch "$HUB/node/udpcheck_node.py" "$TMP" 60 || die "не удалось скачать агент"
+  GOT="$(sha256sum "$TMP" | cut -d' ' -f1)"
+  [ "$GOT" = "$AGENT_SHA256" ] || die "контрольная сумма агента не совпала (получено $GOT, ожидалось $AGENT_SHA256). Установка прервана."
+  python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$TMP" || die "скачанный файл не является корректным Python"
+  mkdir -p /opt/udpcheck-node /etc/udpcheck-node
+  cp "$TMP" /opt/udpcheck-node/udpcheck_node.py
+  chmod 644 /opt/udpcheck-node/udpcheck_node.py
+  chmod 755 /opt/udpcheck-node
+  chown nobody /etc/udpcheck-node 2>/dev/null || true
+  chmod 700 /etc/udpcheck-node
+  cat > /etc/init.d/udpcheck-node <<'INITEOF'
+#!/bin/sh /etc/rc.common
+# udpcheck: узел сети проверок UDP
+START=95
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	procd_open_instance
+	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --config /etc/udpcheck-node/config.json
+	procd_set_param user nobody
+	procd_set_param no_new_privs 1
+	procd_set_param respawn 3600 20 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+INITEOF
+  chmod 755 /etc/init.d/udpcheck-node
+  if [ "$ROLE" != node ]; then sed -i "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" /etc/init.d/udpcheck-node; fi
+  /etc/init.d/udpcheck-node enable
+  /etc/init.d/udpcheck-node restart
+  say "Служба запущена, жду регистрацию узла..."
+  i=0
+  CALL=""
+  while [ "$i" -lt 25 ]; do
+    CALL="$(logread 2>/dev/null | grep 'Позывной' | tail -1 || true)"
+    [ -n "$CALL" ] && break
+    i=$((i + 1))
+    sleep 1
+  done
+  say ""
+  if [ -n "$CALL" ]; then say "Готово. $CALL"; else say "Служба запущена, но регистрацию в журнале пока не вижу. Проверьте: logread | grep udpcheck"; fi
+  if [ "$ROLE" != node ]; then
+    i=0; RL=""
+    while [ "$i" -lt 20 ] && [ -z "$RL" ]; do RL="$(logread 2>/dev/null | grep 'Опорная роль' | tail -1 || true)"; [ -n "$RL" ] || sleep 1; i=$((i + 1)); done
+    if [ -n "$RL" ]; then say "$RL"; fi
+  fi
+  say ""
+  say "Статус:     /etc/init.d/udpcheck-node status"
+  say "Журнал:     logread -f | grep -i udpcheck"
+  say "Результаты: $HUB (кнопка проверки и таблица провайдеров)"
+  say "Удалить:    (curl -fsSL $HUB/i 2>/dev/null || wget -qO- $HUB/i) | sh -s -- uninstall"
+}
+
+if [ "$ACTION" = uninstall ] && [ "$OPENWRT" = 1 ]; then
+  say "Удаляю узел udpcheck (OpenWrt)..."
+  /etc/init.d/udpcheck-node stop >/dev/null 2>&1 || true
+  /etc/init.d/udpcheck-node disable >/dev/null 2>&1 || true
+  rm -f /etc/init.d/udpcheck-node
+  rm -rf /opt/udpcheck-node /etc/udpcheck-node
+  say "Готово: служба, файлы и настройки (включая токен узла) удалены. Пакеты Python остались: удалить можно через apk del python3-light (OpenWrt 25.12+) или opkg remove python3-light."
+  exit 0
+fi
+
+if [ "$ACTION" = uninstall ]; then
+  say "Удаляю узел udpcheck..."
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now "$SVC" >/dev/null 2>&1 || true
+  fi
+  rm -f "$UNIT"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+  rm -rf "$DIR" "$STATE" /var/lib/private/udpcheck-node
+  say "Готово: служба, файлы и настройки (включая токен узла) удалены."
+  exit 0
+fi
+[ "$ACTION" = install ] || die "неизвестное действие '$ACTION' (допустимо: install, uninstall)"
+
+if [ "$OPENWRT" = 1 ]; then
+  openwrt_install
+  exit 0
+fi
+
+if [ ! -d /run/systemd/system ]; then
+  # Подсказка под то, что есть в системе (на Alpine нет ни systemd, ни Python, ни curl)
+  if command -v curl >/dev/null 2>&1; then DL="curl -fsSL $HUB/node/udpcheck_node.py -o udpcheck_node.py"; else DL="wget -qO udpcheck_node.py $HUB/node/udpcheck_node.py"; fi
+  PYHINT=""
+  command -v python3 >/dev/null 2>&1 || { command -v apk >/dev/null 2>&1 && PYHINT="сначала поставьте Python: apk add python3; "; }
+  die "systemd не найден. Установщик пока поддерживает только системы с systemd. Запуск вручную: ${PYHINT}${DL} && python3 udpcheck_node.py"
+fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die "нужен curl или wget"
+
+say "udpcheck-node: подключение этого сервера к сети проверок UDP"
+say ""
+say "Будет сделано:"
+say "  1. при необходимости установлен python3 (3.7 или новее);"
+say "  2. агент скачан с $HUB/node/udpcheck_node.py, проверена контрольная сумма SHA-256, файл положен в $DIR;"
+say "  3. создана служба $SVC: временный пользователь без прав, только исходящие соединения."
+detect_role
+say_role_notice
+say ""
+if [ "${UDPCHECK_YES:-0}" != 1 ]; then
+  say "Начало через 5 секунд. Отмена: Ctrl+C."
+  sleep 5
+fi
+
+py_ok() { command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; }
+
+if ! py_ok; then
+  say "Python 3.7+ не найден, пробую установить..."
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 ca-certificates
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q python3 ca-certificates
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q python3 ca-certificates
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper -n install python3 ca-certificates
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -S --noconfirm --needed python ca-certificates
+  else
+    die "не удалось определить менеджер пакетов: установите Python 3.7+ вручную и повторите"
+  fi
+  py_ok || die "после установки Python 3.7+ всё ещё не найден"
+fi
+
+say "Проверяю доступность хаба..."
+fetch "$HUB/api/v2/stats?hours=1" /dev/null 20 || die "хаб $HUB недоступен с этого сервера (нужен исходящий HTTPS)"
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+say "Скачиваю агент..."
+fetch "$HUB/node/udpcheck_node.py" "$TMP" 60 || die "не удалось скачать агент"
+if command -v sha256sum >/dev/null 2>&1; then
+  GOT="$(sha256sum "$TMP" | cut -d' ' -f1)"
+elif command -v shasum >/dev/null 2>&1; then
+  GOT="$(shasum -a 256 "$TMP" | cut -d' ' -f1)"
+else
+  die "нет sha256sum, проверить контрольную сумму нечем"
+fi
+[ "$GOT" = "$AGENT_SHA256" ] || die "контрольная сумма агента не совпала (получено $GOT, ожидалось $AGENT_SHA256). Установка прервана."
+python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$TMP" || die "скачанный файл не является корректным Python"
+
+install -d -m 755 "$DIR"
+install -m 644 "$TMP" "$DIR/udpcheck_node.py"
+
+cat > "$UNIT" <<'UNITEOF'
+[Unit]
+Description=udpcheck: узел сети проверок UDP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --config /var/lib/udpcheck-node/config.json
+# Временный пользователь без прав; состояние (токен узла) только в /var/lib/udpcheck-node.
+DynamicUser=yes
+StateDirectory=udpcheck-node
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+MemoryMax=96M
+TasksMax=16
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+chmod 644 "$UNIT"
+if [ "$ROLE" != node ]; then
+  sed -i -e "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" -e 's|^TasksMax=16|TasksMax=40|' "$UNIT"
+fi
+
+systemctl daemon-reload
+systemctl enable "$SVC" >/dev/null 2>&1
+systemctl restart "$SVC"
+
+say "Служба запущена, жду регистрацию узла..."
+i=0
+CALL=""
+while [ "$i" -lt 25 ]; do
+  CALL="$(journalctl -u "$SVC" --no-pager -o cat --since '-3min' 2>/dev/null | grep -m1 'Позывной' || true)"
+  [ -n "$CALL" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+
+say ""
+if [ -n "$CALL" ]; then
+  say "Готово. $CALL"
+else
+  say "Служба запущена, но регистрацию в журнале пока не вижу. Проверьте: journalctl -u $SVC -n 30"
+fi
+if [ "$ROLE" != node ]; then
+  i=0; RL=""
+  while [ "$i" -lt 20 ] && [ -z "$RL" ]; do
+    RL="$(journalctl -u "$SVC" --no-pager -o cat --since '-3min' 2>/dev/null | grep 'Опорная роль' | tail -1 || true)"
+    [ -n "$RL" ] || sleep 1
+    i=$((i + 1))
+  done
+  if [ -n "$RL" ]; then say "$RL"; fi
+  case "$RL" in *"не активна"*) fw_help ;; esac
+fi
+say ""
+say "Статус:     systemctl status $SVC"
+say "Журнал:     journalctl -u $SVC -f"
+say "Результаты: $HUB (кнопка проверки и таблица провайдеров)"
+say "Удалить:    (curl -fsSL $HUB/i 2>/dev/null || wget -qO- $HUB/i) | sh -s -- uninstall"

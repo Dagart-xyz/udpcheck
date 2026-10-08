@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Ежедневная проверка обновления баз DB-IP Lite (город и сеть). Скачиваем только если файл за текущий месяц изменился.
+# Сервис сам подхватывает новый файл по времени изменения. Данные DB-IP, лицензия CC BY 4.0 (атрибуция на сайте).
+set -eu
+D=/opt/udpcheck/geo
+M="$(date -u +%Y-%m)"
+heads() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSI --max-time 30 "$1" 2>/dev/null
+  else wget -qS --spider -T 30 "$1" 2>&1; fi
+}
+get() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL --max-time 900 -o "$2" "$1"
+  else wget -q -T 900 -O "$2" "$1"; fi
+}
+for n in city asn; do
+  U="https://download.db-ip.com/free/dbip-$n-lite-$M.mmdb.gz"
+  F="$D/dbip-$n-lite.mmdb"
+  H="$(heads "$U" | tr -d '\r' | grep -iE '^ *(etag|last-modified):' | md5sum | cut -c1-16 || true)"
+  [ -n "$H" ] || continue
+  [ "$(cat "$F.state" 2>/dev/null || true)" = "$H" ] && continue
+  T="$(mktemp -p "$D" .dl.XXXXXX)"
+  if get "$U" "$T.gz" && gzip -t "$T.gz" && gunzip -c "$T.gz" > "$T" && [ "$(stat -c %s "$T")" -gt 1000000 ]; then
+    chmod 644 "$T"
+    mv "$T" "$F"
+    echo "$H" > "$F.state"
+    echo "обновлено: $n ($M)"
+  fi
+  rm -f "$T" "$T.gz"
+done

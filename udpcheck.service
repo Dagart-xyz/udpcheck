@@ -1,0 +1,50 @@
+[Unit]
+Description=udpcheck: UDP-эхо и трассировка до запросившего
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/udpcheck/udpcheck_server.py
+
+# Порты и лимиты (значения по умолчанию в самом скрипте; здесь только то, что важно)
+Environment=UDPCHECK_HTTP_BIND=127.0.0.1
+Environment=UDPCHECK_HTTP_PORT=18080
+Environment=UDPCHECK_UDP_PORTS=993,777,47321
+# Роль цели (секрет и адрес хаба лежат в файле, читается systemd от root). Файла нет: роль выключена.
+EnvironmentFile=-/etc/udpcheck/target.env
+
+# Не root: одноразовый пользователь + только две нужные возможности.
+# CAP_NET_BIND_SERVICE: UDP-порты ниже 1024. CAP_NET_RAW: ICMP/TCP-трассировка (traceroute -I / -T).
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# Изоляция: сервис ничего не пишет на диск и ничего не видит лишнего.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# Сервер маленький (1 vCPU, ~450 МБ), поэтому потолки.
+MemoryMax=96M
+TasksMax=64
+
+# Никаких логов о клиентах. Скрипт сам ничего не печатает; stdout отключён.
+# stderr оставлен в journald только ради ошибок запуска (например, порт занят): адресов клиентов там нет.
+StandardOutput=null
+StandardError=journal
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

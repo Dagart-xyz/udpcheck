@@ -1,0 +1,5 @@
+[Unit]
+Description=udpcheck: копия хаба на сервер копий
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/udpcheck-backup

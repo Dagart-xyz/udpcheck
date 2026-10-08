@@ -1,0 +1,5 @@
+[Unit]
+Description=udpcheck: обновление баз GeoIP (DB-IP Lite)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/udpcheck-geo-update

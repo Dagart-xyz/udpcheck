@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Принимает архив со stdin от хаба, кладёт с датой, хранит 14 последних. Больше этот ключ ничего не умеет.
+set -eu
+D=/home/udpbackup/backups
+T="$D/.incoming.$$"
+cat > "$T"
+[ -s "$T" ] || { rm -f "$T"; exit 1; }
+gzip -t "$T" 2>/dev/null || { rm -f "$T"; exit 2; }
+mv "$T" "$D/hub-$(date +%Y%m%d-%H%M).tar.gz"
+ls -1t "$D"/hub-*.tar.gz | tail -n +15 | xargs -r rm -f

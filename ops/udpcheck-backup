@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Ежедневная копия хаба на сервер копий: база (через снимок SQLite), списки опорных серверов с секретами, настройки, сайт.
+# куда класть копии: BACKUP_DEST=пользователь@сервер, BACKUP_KEY=файл ключа (по умолчанию /root/.ssh/backup_ed25519)
+[ -r /etc/udpcheck/backup.env ] && . /etc/udpcheck/backup.env
+: "${BACKUP_DEST:?укажите BACKUP_DEST в /etc/udpcheck/backup.env}"
+BACKUP_KEY="${BACKUP_KEY:-/root/.ssh/backup_ed25519}"
+set -eu
+W="$(mktemp -d)"
+trap 'rm -rf "$W"' EXIT
+python3 - "$W/hub.db" <<PY
+import sqlite3, sys
+s = sqlite3.connect("/var/lib/private/udpcheck/hub.db", timeout=30)
+d = sqlite3.connect(sys.argv[1])
+s.backup(d)
+d.close()
+PY
+mkdir -p "$W/files"
+cp -a /etc/udpcheck "$W/files/etc-udpcheck"
+cp -a /opt/udpcheck/geo/overrides.json /opt/udpcheck/geo/names.json "$W/files/" 2>/dev/null || true
+cp -a /var/www/udpcheck-site "$W/files/site"
+cp -a /etc/caddy/Caddyfile "$W/files/"
+cp -a /etc/systemd/system/udpcheck.service /etc/systemd/system/udpcheck.service.d "$W/files/" 2>/dev/null || true
+tar -C "$W" -czf - hub.db files | ssh -i "$BACKUP_KEY" -o BatchMode=yes -o ConnectTimeout=20 "$BACKUP_DEST"
+# отметка об успехе: по ней наблюдатель проверяет свежесть копий (хаб отдаёт её возраст в /api/v2/health)
+date +%s > /var/lib/private/udpcheck/last_backup
+chmod 644 /var/lib/private/udpcheck/last_backup
