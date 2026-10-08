@@ -101,6 +101,15 @@ UDPCHECK_TARGET_TCP_PORT=8443
 - **Резервные копии:** `ops/udpcheck-backup` + таймер; адрес и ключ в `/etc/udpcheck/backup.env` (`BACKUP_DEST`, `BACKUP_KEY`).
 - **Оповещения:** `ops/udpcheck-watch.py` на отдельном сервере (Telegram или ntfy), описание в начале файла и в `ops/README.md`.
 
+## Защита от ботов и сканеров
+
+На публичном сервере сразу видны сканеры (на нашем хабе около 800 неудачных попыток входа по SSH в сутки). Минимум, который мы ставим, без журналов адресов посетителей:
+- вход по SSH только по ключам (`PasswordAuthentication no`) и `fail2ban` с jail `sshd` (на Ubuntu юнит называется `ssh.service`: `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`);
+- `ops/hardening/udpcheck-guard.nft`: ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти;
+- `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса;
+- автообновления безопасности (`unattended-upgrades`).
+Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.
+
 ## 5. Проверка и сопровождение
 
 **Перенос базы на другой сервер.** Службе принадлежит только каталог состояния. Если вы кладёте `hub.db` от имени root, после переноса выполните

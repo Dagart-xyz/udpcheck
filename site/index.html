@@ -94,6 +94,12 @@ ul.clean{margin:0;padding-left:20px}
 ul.clean li{margin:6px 0}
 details summary{cursor:pointer;font-weight:700;font-size:17px}
 details[open] summary{margin-bottom:12px}
+.consent{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.4}
+#notice{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--surface);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:12.5px;line-height:1.35;color:var(--muted)}
+#notice[hidden]{display:none}
+#notice:not([hidden]) ~ #newver{bottom:64px}
+#notice button{flex:none;border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:8px;padding:6px 12px;font:inherit;font-weight:600;cursor:pointer}
+@media (max-width:520px){#notice{padding:6px 10px;gap:8px}}
 footer{padding:28px 0 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);margin-top:20px}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:8px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -172,6 +178,7 @@ button.btn.ghost{border:1px solid var(--line)}
       <button class="go" id="go" type="button">Проверить мою сеть</button>
       <span class="hint">Выключите VPN и обход блокировок, иначе проверится он, а не провайдер. Занимает около 10 секунд.</span>
     </div>
+    <p class="consent">Нажимая кнопку, вы соглашаетесь с <a href="/terms">условиями</a> и <a href="/privacy">политикой</a>: на время проверки сервис использует ваш IP-адрес, в базу он не записывается.</p>
 
     <div id="result" aria-live="polite">
       <div class="card answer" id="answer"></div>
@@ -273,10 +280,11 @@ button.btn.ghost{border:1px solid var(--line)}
 
   <footer>
     <div id="attr">IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (CC BY 4.0). Названия городов: <a href="https://www.geonames.org">GeoNames</a> (CC BY 4.0)</div>
-    <div><a href="/protocol.txt">Протокол узлов</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Исходный код (AGPL-3.0)</a> · Связь: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a></div>
+    <div><a href="/privacy">Политика данных</a> · <a href="/terms">Условия</a> · <a href="/protocol.txt">Протокол узлов</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Исходный код (AGPL-3.0)</a> · Связь: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a></div>
   </footer>
 </div>
 
+<div id="notice" hidden><span>Мы не используем cookie и счётчики; в браузере хранится только случайный номер для лимитов. <a href="/privacy">Подробнее</a></span><button type="button" id="noticeBtn">Понятно</button></div>
 <div id="newver" hidden><span>Вышла новая версия сайта.</span><button type="button" class="btn" id="newverBtn">Обновить</button></div>
 <script>
 (function(){
@@ -1010,6 +1018,13 @@ document.addEventListener("click", function(e){
   }
 });
 window.addEventListener("popstate", route);
+// Плашка о данных: одна тонкая строка внизу, ничего не блокирует, закрывается один раз и запоминается
+(function(){
+  var seen = false;
+  try { seen = localStorage.getItem("udpc_notice") === "1"; } catch(e){}
+  if (!seen) $("notice").hidden = false;
+  $("noticeBtn").addEventListener("click", function(){ $("notice").hidden = true; try { localStorage.setItem("udpc_notice", "1"); } catch(e){} });
+})();
 // Открытая вкладка со старой версией: сверяем метку версии с сервером; если проверка не идёт, обновляем сама, иначе предлагаем кнопку
 function checkVersion(){
   if (BUILD.indexOf("__") === 0) return;

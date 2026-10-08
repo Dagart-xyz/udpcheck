@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Лёгкая защита хаба и опорных серверов на уровне ядра (nftables): ограничивает частоту НОВЫХ соединений и пакетов с одного адреса.
+# Без журналов и без списков адресов на диске: состояние живёт только в памяти ядра и стирается само (timeout). Сообщения посетителей не затрагиваются:
+# пороги высокие и рассчитаны на то, что за одним адресом (мобильный оператор) могут сидеть тысячи людей.
+# Установка: cp udpcheck-guard.nft /etc/nftables.conf && systemctl enable --now nftables && nft -f /etc/nftables.conf
+# Посмотреть, сколько отсекли:  nft list table inet udpcheck_guard
+table inet udpcheck_guard
+delete table inet udpcheck_guard
+table inet udpcheck_guard {
+	chain input {
+		type filter hook input priority -10; policy accept;
+		ct state established,related accept
+		iif "lo" accept
+		# SSH: новые соединения с одного адреса не чаще 10 в минуту (для IPv6 считаем по сети /64)
+		tcp dport 22 ct state new meter ssh4 { ip saddr timeout 60s limit rate over 10/minute burst 10 packets } counter drop
+		tcp dport 22 ct state new meter ssh6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 60s limit rate over 10/minute burst 10 packets } counter drop
+		# Сайт и API: новые соединения не чаще 100 в секунду с адреса (всплеск 200)
+		tcp dport { 80, 443 } ct state new meter web4 { ip saddr timeout 30s limit rate over 100/second burst 200 packets } counter drop
+		tcp dport { 80, 443 } ct state new meter web6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 30s limit rate over 100/second burst 200 packets } counter drop
+		# HTTP/3 (QUIC)
+		udp dport 443 meter quic4 { ip saddr timeout 30s limit rate over 2000/second burst 4000 packets } counter drop
+		# Порты проверки (STUN и эхо): пакетов с одного адреса не больше 500 в секунду
+		udp dport { 777, 993, 47321, 3478, 19302 } meter udp4 { ip saddr timeout 30s limit rate over 500/second burst 1000 packets } counter drop
+		# Контроль TCP серверов-целей
+		tcp dport 8443 ct state new meter tcp4 { ip saddr timeout 30s limit rate over 30/second burst 60 packets } counter drop
+	}
+}

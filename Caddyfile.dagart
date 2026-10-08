@@ -1,6 +1,23 @@
+# Ограничения против медленных и гигантских запросов (боты, сканеры): заголовок и тело читаются недолго, заголовки небольшие.
+# write 60s: хаб держит ответ до 25 с (длинный опрос серверов-целей).
+{
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 20s
+			write 60s
+			idle 2m
+		}
+		max_header_size 16KB
+	}
+}
+
 # Хаб слушает только 127.0.0.1:18080. Простаивающие соединения к нему закрываем раньше, чем он сам (у него таймаут 20 с): иначе Caddy иногда
 # берёт уже закрытое соединение и запрос (особенно POST серверов-целей) обрывается с EOF.
 (hub) {
+	request_body {
+		max_size 64KB
+	}
 	reverse_proxy 127.0.0.1:18080 {
 		transport http {
 			keepalive 10s
@@ -28,6 +45,9 @@ dagart.xyz {
 			Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
 		}
 		rewrite /i /install-node.sh
+		# страницы документов без расширения
+		@docs path /privacy /terms
+		rewrite @docs {path}.html
 		# страницы провайдеров /as29124: та же страница, дальше работает JS
 		@prov path_regexp ^/as[0-9]{1,10}/?$
 		rewrite @prov /index.html
