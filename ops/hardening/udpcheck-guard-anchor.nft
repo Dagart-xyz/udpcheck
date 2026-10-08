@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Лёгкая защита опорного сервера (без веб-сервера) на уровне ядра: ограничивает частоту НОВЫХ соединений и пакетов с одного адреса.
+# Без журналов и списков адресов на диске: состояние только в памяти ядра и стирается само. Пороги высокие, чтобы не мешать мобильным
+# операторам, у которых за одним адресом тысячи людей.
+# Установка: cp udpcheck-guard-anchor.nft /etc/nftables.conf && systemctl enable --now nftables && nft -f /etc/nftables.conf
+# Посмотреть, сколько отсекли:  nft list table inet udpcheck_guard
+table inet udpcheck_guard
+delete table inet udpcheck_guard
+table inet udpcheck_guard {
+	chain input {
+		type filter hook input priority -10; policy accept;
+		ct state established,related accept
+		iif "lo" accept
+		# SSH: новые соединения с одного адреса не чаще 30 в минуту (для IPv6 считаем по сети /64)
+		tcp dport 22 ct state new meter ssh4 { ip saddr timeout 60s limit rate over 30/minute burst 30 packets } counter drop
+		tcp dport 22 ct state new meter ssh6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 60s limit rate over 30/minute burst 30 packets } counter drop
+		# Порты проверки (STUN и эхо): пакетов с одного адреса не больше 500 в секунду
+		udp dport { 777, 993, 47321, 3478, 19302 } meter udp4 { ip saddr timeout 30s limit rate over 500/second burst 1000 packets } counter drop
+		# Контроль TCP
+		tcp dport 8443 ct state new meter tcp4 { ip saddr timeout 30s limit rate over 30/second burst 60 packets } counter drop
+	}
+}

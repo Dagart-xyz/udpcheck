@@ -105,7 +105,7 @@ UDPCHECK_TARGET_TCP_PORT=8443
 
 На публичном сервере сразу видны сканеры (на нашем хабе около 800 неудачных попыток входа по SSH в сутки). Минимум, который мы ставим, без журналов адресов посетителей:
 - вход по SSH только по ключам (`PasswordAuthentication no`) и `fail2ban` с jail `sshd` (на Ubuntu юнит называется `ssh.service`: `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`);
-- `ops/hardening/udpcheck-guard.nft`: ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти;
+- `ops/hardening/udpcheck-guard.nft` (хаб) и `udpcheck-guard-anchor.nft` (опорный сервер без веб-сервера): ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти. Новые версии nft показывают счётчики как динамические множества (`set ssh4 {...}`): смотрите `nft list table inet udpcheck_guard`;
 - `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса;
 - автообновления безопасности (`unattended-upgrades`).
 Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.

@@ -12,9 +12,9 @@ table inet udpcheck_guard {
 		type filter hook input priority -10; policy accept;
 		ct state established,related accept
 		iif "lo" accept
-		# SSH: новые соединения с одного адреса не чаще 10 в минуту (для IPv6 считаем по сети /64)
-		tcp dport 22 ct state new meter ssh4 { ip saddr timeout 60s limit rate over 10/minute burst 10 packets } counter drop
-		tcp dport 22 ct state new meter ssh6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 60s limit rate over 10/minute burst 10 packets } counter drop
+		# SSH: новые соединения с одного адреса не чаще 30 в минуту (для IPv6 считаем по сети /64)
+		tcp dport 22 ct state new meter ssh4 { ip saddr timeout 60s limit rate over 30/minute burst 30 packets } counter drop
+		tcp dport 22 ct state new meter ssh6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 60s limit rate over 30/minute burst 30 packets } counter drop
 		# Сайт и API: новые соединения не чаще 100 в секунду с адреса (всплеск 200)
 		tcp dport { 80, 443 } ct state new meter web4 { ip saddr timeout 30s limit rate over 100/second burst 200 packets } counter drop
 		tcp dport { 80, 443 } ct state new meter web6 { ip6 saddr and ffff:ffff:ffff:ffff:: timeout 30s limit rate over 100/second burst 200 packets } counter drop
