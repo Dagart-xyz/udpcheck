@@ -50,6 +50,7 @@ python tests/test_refs_local.py
 python tests/test_pad_local.py
 python tests/test_watch_local.py
 python tests/names_selftest.py
+python tests/test_s3_local.py
 ```
 
 Нужны Python 3.10+ и (для части тестов) `traceroute`; на Windows используется заглушка из `tests/`.

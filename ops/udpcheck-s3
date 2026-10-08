@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+"""udpcheck-s3: минимальный клиент S3 на стандартной библиотеке (подпись AWS SigV4) для резервных копий.
+
+  udpcheck-s3 put ФАЙЛ КЛЮЧ          загрузить файл
+  udpcheck-s3 get КЛЮЧ ФАЙЛ          скачать
+  udpcheck-s3 list [ПРЕФИКС]         список объектов (ключ, размер)
+  udpcheck-s3 delete КЛЮЧ            удалить
+  udpcheck-s3 prune ПРЕФИКС СКОЛЬКО  оставить СКОЛЬКО последних объектов с префиксом, остальные удалить (по имени, имена содержат дату)
+
+Настройки берутся из переменных окружения (их кладёт в среду udpcheck-backup из /etc/udpcheck/backup.env):
+  S3_ENDPOINT   s3.ru-3.storage.selcloud.ru      S3_REGION   ru-3        S3_BUCKET   имя бакета
+  S3_ACCESS_KEY / S3_SECRET_KEY                  S3_SCHEME   https (по умолчанию)   S3_PATHSTYLE=1: адрес вида endpoint/bucket/ключ
+"""
+import datetime
+import hashlib
+import hmac
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+
+def _sign(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def sigv4_headers(method, host, path, query, payload_hash, access, secret, region, now, extra=None, service="s3"):
+    """Заголовки с подписью SigV4. path уже закодирован, query: словарь. Возвращает словарь заголовков запроса."""
+    amz = now.strftime("%Y%m%dT%H%M%SZ")
+    day = now.strftime("%Y%m%d")
+    headers = {"host": host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz}
+    headers.update({k.lower(): v for k, v in (extra or {}).items()})
+    names = sorted(headers)
+    canon_headers = "".join("%s:%s\n" % (k, str(headers[k]).strip()) for k in names)
+    signed = ";".join(names)
+    canon_query = "&".join("%s=%s" % (urllib.parse.quote(k, safe="-_.~"), urllib.parse.quote(str(v), safe="-_.~")) for k, v in sorted(query.items()))
+    canon = "\n".join([method, path, canon_query, canon_headers, signed, payload_hash])
+    scope = "%s/%s/%s/aws4_request" % (day, region, service)
+    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz, scope, hashlib.sha256(canon.encode("utf-8")).hexdigest()])
+    k = _sign(("AWS4" + secret).encode("utf-8"), day)
+    for part in (region, service, "aws4_request"):
+        k = _sign(k, part)
+    sig = hmac.new(k, to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    out = {"Host": host, "x-amz-content-sha256": payload_hash, "x-amz-date": amz,
+           "Authorization": "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s" % (access, scope, signed, sig)}
+    for k2, v in (extra or {}).items():
+        out[k2] = v
+    return out, sig
+
+
+class S3:
+    def __init__(self):
+        e = os.environ
+        try:
+            self.endpoint, self.region, self.bucket = e["S3_ENDPOINT"], e["S3_REGION"], e["S3_BUCKET"]
+            self.access, self.secret = e["S3_ACCESS_KEY"], e["S3_SECRET_KEY"]
+        except KeyError as ex:
+            sys.exit("не задана настройка %s" % ex)
+        self.scheme = e.get("S3_SCHEME", "https")
+        self.pathstyle = e.get("S3_PATHSTYLE") == "1"
+
+    def request(self, method, key="", query=None, body=b"", timeout=120):
+        query = query or {}
+        if self.pathstyle:
+            host, path = self.endpoint, "/" + self.bucket + ("/" + key if key else "")
+        else:
+            host, path = "%s.%s" % (self.bucket, self.endpoint), "/" + key
+        path = urllib.parse.quote(path, safe="/-_.~")
+        payload_hash = hashlib.sha256(body).hexdigest()
+        headers, _sig = sigv4_headers(method, host, path, query, payload_hash, self.access, self.secret, self.region, datetime.datetime.now(datetime.timezone.utc))
+        url = "%s://%s%s" % (self.scheme, host, path) + (("?" + urllib.parse.urlencode(sorted(query.items()), quote_via=urllib.parse.quote)) if query else "")
+        req = urllib.request.Request(url, method=method, data=body if method in ("PUT", "POST") else None, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(2000)
+
+    def put(self, path, key):
+        data = open(path, "rb").read()
+        st, body = self.request("PUT", key, body=data)
+        if st not in (200, 201):
+            sys.exit("загрузка не удалась: %d %s" % (st, body[:300].decode("utf-8", "replace")))
+        return len(data)
+
+    def get(self, key, path):
+        st, body = self.request("GET", key)
+        if st != 200:
+            sys.exit("скачивание не удалось: %d %s" % (st, body[:300].decode("utf-8", "replace")))
+        open(path, "wb").write(body)
+        return len(body)
+
+    def delete(self, key):
+        st, body = self.request("DELETE", key)
+        if st not in (200, 204):
+            sys.exit("удаление не удалось: %d %s" % (st, body[:300].decode("utf-8", "replace")))
+
+    def list(self, prefix=""):
+        out, token = [], None
+        while True:
+            q = {"list-type": "2", "prefix": prefix}
+            if token:
+                q["continuation-token"] = token
+            st, body = self.request("GET", "", q)
+            if st != 200:
+                sys.exit("список не получен: %d %s" % (st, body[:300].decode("utf-8", "replace")))
+            root = ET.fromstring(body)
+            ns = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
+            for c in root.findall(ns + "Contents"):
+                out.append((c.findtext(ns + "Key"), int(c.findtext(ns + "Size") or 0)))
+            if root.findtext(ns + "IsTruncated") == "true":
+                token = root.findtext(ns + "NextContinuationToken")
+            else:
+                return sorted(out)
+
+    def prune(self, prefix, keep):
+        items = self.list(prefix)
+        gone = [k for k, _s in items[:-keep]] if keep > 0 and len(items) > keep else []
+        for k in gone:
+            self.delete(k)
+        return gone
+
+
+def main(argv):
+    if len(argv) < 2:
+        print(__doc__)
+        return 2
+    cmd = argv[1]
+    s3 = S3()
+    if cmd == "put" and len(argv) == 4:
+        print("загружено %d байт: %s" % (s3.put(argv[2], argv[3]), argv[3]))
+    elif cmd == "get" and len(argv) == 4:
+        print("скачано %d байт" % s3.get(argv[2], argv[3]))
+    elif cmd == "list":
+        for k, n in s3.list(argv[2] if len(argv) > 2 else ""):
+            print(n, k)
+    elif cmd == "delete" and len(argv) == 3:
+        s3.delete(argv[2])
+        print("удалено", argv[2])
+    elif cmd == "prune" and len(argv) == 4:
+        gone = s3.prune(argv[2], int(argv[3]))
+        print("удалено старых копий: %d" % len(gone))
+    else:
+        print(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

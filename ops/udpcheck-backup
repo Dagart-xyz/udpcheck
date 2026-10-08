@@ -1,12 +1,19 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 UDPcheck authors
-# Ежедневная копия хаба на сервер копий: база (через снимок SQLite), списки опорных серверов с секретами, настройки, сайт.
-# куда класть копии: BACKUP_DEST=пользователь@сервер, BACKUP_KEY=файл ключа (по умолчанию /root/.ssh/backup_ed25519)
-[ -r /etc/udpcheck/backup.env ] && . /etc/udpcheck/backup.env
-: "${BACKUP_DEST:?укажите BACKUP_DEST в /etc/udpcheck/backup.env}"
-BACKUP_KEY="${BACKUP_KEY:-/root/.ssh/backup_ed25519}"
+# Ежедневная копия хаба: база (через снимок SQLite), списки опорных серверов с секретами, настройки, сайт.
+# Куда класть копии задаёт /etc/udpcheck/backup.env (можно оба назначения сразу):
+#   по SSH на свой сервер:  BACKUP_DEST=пользователь@сервер  BACKUP_KEY=файл ключа (по умолчанию /root/.ssh/backup_ed25519)
+#   в S3-хранилище:         S3_ENDPOINT=s3.ru-3.storage.selcloud.ru  S3_REGION=ru-3  S3_BUCKET=имя  S3_ACCESS_KEY=...  S3_SECRET_KEY=...
+#                           S3_KEEP=14 (сколько копий хранить)  BACKUP_PASS_FILE=/etc/udpcheck/backup.pass (пароль шифрования, по умолчанию он)
+# В S3 копия уходит ЗАШИФРОВАННОЙ (AES-256, openssl); пароль нужен для восстановления: храните его и вне сервера.
+# Расшифровать:  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:backup.pass -in копия.tar.gz.enc -out копия.tar.gz
+[ -r /etc/udpcheck/backup.env ] && { set -a; . /etc/udpcheck/backup.env; set +a; }
 set -eu
+BACKUP_DEST="${BACKUP_DEST:-}"
+BACKUP_KEY="${BACKUP_KEY:-/root/.ssh/backup_ed25519}"
+S3_BUCKET="${S3_BUCKET:-}"
+[ -n "$BACKUP_DEST" ] || [ -n "$S3_BUCKET" ] || { echo "в /etc/udpcheck/backup.env не задано ни BACKUP_DEST, ни S3_BUCKET" >&2; exit 1; }
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 python3 - "$W/hub.db" <<PY
@@ -18,11 +25,27 @@ d.close()
 PY
 mkdir -p "$W/files"
 cp -a /etc/udpcheck "$W/files/etc-udpcheck"
-cp -a /opt/udpcheck/geo/overrides.json /opt/udpcheck/geo/names.json "$W/files/" 2>/dev/null || true
+rm -f "$W/files/etc-udpcheck/backup.env" "$W/files/etc-udpcheck/backup.pass"      # ключи доступа к копиям и пароль в саму копию не кладём
+for f in overrides names brands provider_kinds; do cp -a "/opt/udpcheck/geo/$f.json" "$W/files/" 2>/dev/null || true; done
 cp -a /var/www/udpcheck-site "$W/files/site"
 cp -a /etc/caddy/Caddyfile "$W/files/"
 cp -a /etc/systemd/system/udpcheck.service /etc/systemd/system/udpcheck.service.d "$W/files/" 2>/dev/null || true
-tar -C "$W" -czf - hub.db files | ssh -i "$BACKUP_KEY" -o BatchMode=yes -o ConnectTimeout=20 "$BACKUP_DEST"
+tar -C "$W" -czf "$W/hub.tgz" hub.db files
+OK=1
+if [ -n "$BACKUP_DEST" ]; then
+  ssh -i "$BACKUP_KEY" -o BatchMode=yes -o ConnectTimeout=20 "$BACKUP_DEST" < "$W/hub.tgz" || { echo "копия по SSH не ушла" >&2; OK=0; }
+fi
+if [ -n "$S3_BUCKET" ]; then
+  NAME="hub-$(date -u +%Y%m%d-%H%M).tar.gz.enc"
+  if openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:${BACKUP_PASS_FILE:-/etc/udpcheck/backup.pass}" -in "$W/hub.tgz" -out "$W/hub.enc" \
+     && /usr/local/sbin/udpcheck-s3 put "$W/hub.enc" "hub/$NAME"; then
+    /usr/local/sbin/udpcheck-s3 prune hub/ "${S3_KEEP:-14}" || echo "старые копии в S3 удалить не удалось" >&2
+  else
+    echo "копия в S3 не ушла" >&2
+    OK=0
+  fi
+fi
+[ "$OK" = 1 ] || exit 1
 # отметка об успехе: по ней наблюдатель проверяет свежесть копий (хаб отдаёт её возраст в /api/v2/health)
 date +%s > /var/lib/private/udpcheck/last_backup
 chmod 644 /var/lib/private/udpcheck/last_backup

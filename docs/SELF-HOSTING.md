@@ -109,6 +109,7 @@ python tests/test_refs_local.py    # серверы добровольцев
 python tests/test_pad_local.py     # длинные ответы
 python tests/test_watch_local.py   # оповещения и разбор названий
 python tests/names_selftest.py     # названия и группы операторов
+python tests/test_s3_local.py      # клиент S3 для резервных копий
 ```
 Обновление: заменить два файла в `/opt/udpcheck/` и `systemctl restart udpcheck` (сначала хаб, потом опорные серверы). Старые данные
 удаляются сами по сроку хранения.
