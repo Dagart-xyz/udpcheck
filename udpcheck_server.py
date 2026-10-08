@@ -649,6 +649,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -659,9 +661,15 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True   # в запросе мог остаться непрочитанный body
         self.send_json(code, {"error": msg}, {"Retry-After": str(retry)} if retry else None)
 
+    def body_len(self):
+        """Заявленная длина тела; -1, если заголовок некорректный."""
+        v = (self.headers.get("Content-Length", "0") or "0").strip()
+        return int(v) if v.isascii() and v.isdigit() and len(v) < 10 else -1
+
     def read_body(self, limit):
-        n = int(self.headers.get("Content-Length", "0") or 0)
+        n = self.body_len()
         if n < 0 or n > limit:
+            self.close_connection = True      # тело не прочитано: соединение дальше использовать нельзя
             return None
         return self.rfile.read(n) if n else b""
 
@@ -687,6 +695,10 @@ class Handler(BaseHTTPRequestHandler):
     do_HEAD = do_GET
 
     def dispatch(self, method):
+        # Хаб тела с Transfer-Encoding не читает: оставшиеся в соединении байты разобрались бы как следующий запрос (рассинхронизация с прокси).
+        # Так же с телом у GET/HEAD. Такие запросы отклоняем, а соединение закрываем.
+        if self.headers.get("Transfer-Encoding") or (method != "POST" and self.body_len() != 0):
+            return self.err(400, "запрос с таким телом не принимается")
         path = self.route()
         if path.startswith("/api/v2/") and V2 is not None:
             return V2.dispatch(self, method, path)

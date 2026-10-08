@@ -19,6 +19,8 @@
 		max_size 64KB
 	}
 	reverse_proxy 127.0.0.1:18080 {
+		# тело до 64 КБ буферизуется, и хабу уходит заголовок Content-Length (он не читает Transfer-Encoding)
+		request_buffers 64KB
 		transport http {
 			keepalive 10s
 		}

@@ -108,7 +108,9 @@ UDPCHECK_TARGET_TCP_PORT=8443
 - `ops/hardening/udpcheck-guard.nft` (хаб) и `udpcheck-guard-anchor.nft` (опорный сервер без веб-сервера): ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти. Новые версии nft показывают счётчики как динамические множества (`set ssh4 {...}`): смотрите `nft list table inet udpcheck_guard`;
 - `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса, сжатие ответов, HSTS, `Permissions-Policy` и строгий CSP;
 - `ops/hardening/journald-udpcheck.conf` в `/etc/systemd/journald.conf.d/`: системный журнал не дольше 30 суток (в нём попытки входа по SSH; это единственное место, где остаются адреса, и политика данных об этом говорит);
-- автообновления безопасности (`unattended-upgrades`).
+- `ops/hardening/sshd-udpcheck.conf` в `/etc/ssh/sshd_config.d/10-udpcheck.conf`: только ключи, без проброса портов, X11 и агента, `LoginGraceTime 30`, `MaxAuthTries 4` (проверьте `sshd -t` и откройте второе подключение, прежде чем закрыть первое);
+- автообновления безопасности: `unattended-upgrades` и `ops/hardening/20auto-upgrades`. На некоторых образах хостеров `apt-daily*.service` замаскированы (`systemctl unmask apt-daily.service apt-daily-upgrade.service`). Ядро и libc применяются только после перезагрузки: смотрите `/var/run/reboot-required` и перезагружайте серверы по одному, проверяя после каждого `nft list tables`, службы и ответ портов снаружи;
+- перед публикацией правок прогоняйте `tests/fuzz_local.py` (мусорные UDP- и HTTP-запросы) и остальные `tests/test_*_local.py`.
 Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.
 
 ## 5. Проверка и сопровождение

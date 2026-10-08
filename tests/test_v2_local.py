@@ -172,6 +172,8 @@ def start(http_port, udp, tid, secret, tcp, extra=None):
 def api(method, path, body=None, token=None, headers=None, port=18080):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     h = dict(headers or {})
+    if path.startswith("/api/v2/web/"):
+        h.setdefault("X-Client", "c" * 32)          # запросы страницы всегда идут с номером браузера
     if token:
         h["Authorization"] = "Bearer " + token
     data = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else None)
@@ -254,6 +256,39 @@ try:
     check("агент завершился без ошибки", r2.returncode == 0, r2.stderr[-300:])
     check("вывод: режется входящий UDP из-за рубежа", "Режется ВХОДЯЩИЙ UDP из-за рубежа" in out2, out2[-500:])
     check("порты зарубежной цели: дошло 100, ответов 0", "дошло на цель: 100  ответов получено: 0" in out2, out2)
+
+    print("[защита от запросов с чужих страниц и от рассинхронизации]")
+    check("web/stun без заголовка X-Client (так выглядит запрос с чужой страницы) -> 403", api("GET", "/api/v2/web/stun", headers={"X-Client": ""})[0] == 403)
+    check("web/trace с Sec-Fetch-Site: cross-site -> 403", api("POST", "/api/v2/web/trace", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403)
+    check("web/report без X-Client -> 403", api("POST", "/api/v2/web/report", {"verdict": "NO_BLOCK", "results": []}, headers={"X-Client": ""})[0] == 403)
+    check("запрос со страницы (same-origin) проходит", api("GET", "/api/v2/web/stun", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200)
+
+    def rawhub(data, wait=0.6):
+        sk = socket.create_connection(("127.0.0.1", 18080), timeout=5)
+        sk.sendall(data)
+        time.sleep(wait)
+        sk.settimeout(1)
+        out = b""
+        try:
+            while True:
+                d = sk.recv(65536)
+                if not d:
+                    break
+                out += d
+        except OSError:
+            pass
+        sk.close()
+        return out
+    r = rawhub(b"POST /udpcheck/api/v2/node/register HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+               b"GET /udpcheck/api/v2/version HTTP/1.1\r\nHost: x\r\n\r\n")
+    check("тело с Transfer-Encoding отклонено 400, соединение закрыто (следующий запрос не обрабатывается)", r.startswith(b"HTTP/1.1 400") and r.count(b"HTTP/1.1") == 1
+          and b"Connection: close" in r, r[:300])
+    r = rawhub(b"GET /udpcheck/api/v2/version HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello")
+    check("GET с телом отклонён 400", r.startswith(b"HTTP/1.1 400"), r[:200])
+    r = rawhub(b"POST /udpcheck/api/v2/node/register HTTP/1.1\r\nHost: x\r\nContent-Length: abc\r\n\r\n")
+    check("Content-Length не число: 413, а не 500", r.startswith(b"HTTP/1.1 413") or r.startswith(b"HTTP/1.1 400"), r[:200])
+    r = rawhub(b"POST /udpcheck/api/v2/node/register HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n[1]")
+    check("регистрация с телом-массивом: 400, а не 500", r.startswith(b"HTTP/1.1 400"), r[:200])
 
     print("[кнопка на сайте: трассировка от целей до посетителя]")
     st, w = api("POST", "/api/v2/web/trace")

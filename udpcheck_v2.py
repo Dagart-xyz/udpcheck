@@ -674,6 +674,12 @@ def janitor():
                     db_exec("DELETE FROM %s WHERE ts < ?" % tbl, (cutoff,))
                 except Exception:
                     pass
+            try:
+                # узел, который неделю не выходил на связь и не сделал ни одного замера, не был сервером участника: это брошенная (или массовая) регистрация
+                db_exec("DELETE FROM nodes WHERE last_seen < ? AND id NOT IN (SELECT DISTINCT node_id FROM rounds) AND id NOT IN (SELECT node_id FROM refs)",
+                        (int(now - 7 * 86400),))
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------- узлы
@@ -2206,6 +2212,13 @@ def _community_for_browser(ip, vasn, vc):
     return out
 
 
+def _from_our_page(h):
+    """Запросы браузерной проверки должны идти со страницы нашего сайта. Чужая страница может заставить браузер посетителя отправить запрос
+    без заголовков, но заголовок X-Client делает запрос «непростым»: браузер сначала спросит разрешения (CORS), а мы его не даём.
+    Sec-Fetch-Site: cross-site отсекает и остальное."""
+    return _cid(h) is not None and h.headers.get("Sec-Fetch-Site", "") != "cross-site"
+
+
 def web_stun(h, ip):
     """Список целей для UDP-проверки из браузера (WebRTC/STUN): адрес и порты, больше ничего."""
     ok, retry = rl_web.allow(ip or "local")
@@ -2378,6 +2391,8 @@ def dispatch(h, method, path):
         return target_trace_result(h, body) if body is not None else h.err(413, "слишком большое тело")
     if ip is None:
         return h.err(400, "не удалось определить адрес клиента")
+    if path.startswith("/api/v2/web/") and not _from_our_page(h):
+        return h.err(403, "запрос не со страницы сайта")
     if path == "/api/v2/web/stun" and method == "GET":
         return web_stun(h, ip)
     if path == "/api/v2/web/report" and method == "POST":

@@ -22,6 +22,7 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, ROOT)
 import udpcheck_node as N
 
+
 fails = 0
 
 
@@ -59,6 +60,8 @@ def http_x(hub, method, path, body=None, token=None, timeout=40):
     req = urllib.request.Request(hub + path, data=data, method=method)
     req.add_header("Content-Type", "application/json")
     req.add_header("X-Forwarded-For", XFF["v"])
+    if path.startswith("/api/v2/web/"):
+        req.add_header("X-Client", "d" * 32)          # запросы страницы идут с номером браузера
     if token:
         req.add_header("Authorization", "Bearer " + token)
     try:
