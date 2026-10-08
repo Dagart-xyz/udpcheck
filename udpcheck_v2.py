@@ -690,6 +690,8 @@ def _auth_node(h, ip):
     auth = h.headers.get("Authorization", "")
     if not auth.startswith("Bearer ") or len(auth) > 200:
         return None
+    if ip and rl_auth.over("bad:" + ip):      # с этого адреса слишком много неверных токенов: базу не дёргаем
+        return None
     row = db_exec("SELECT id, callsign, asn, next_due, probe_now FROM nodes WHERE token_hash = ?", (_hash(auth[7:].strip()),), one=True)
     if row is None and ip:
         rl_auth.allow("bad:" + ip)
@@ -747,6 +749,8 @@ def node_register(h, ip, body):
     try:
         req = json.loads(body.decode("utf-8")) if body else {}
     except ValueError:
+        return h.err(400, "некорректный JSON")
+    if not isinstance(req, dict):
         return h.err(400, "некорректный JSON")
     client = str(req.get("client", ""))[:60]
     token = secrets.token_urlsafe(24)
@@ -1686,12 +1690,28 @@ def _db_writable():
         return False
 
 
+def _beat_ok(h, ip):
+    """Секрет наблюдателя в заголовке X-Beat. Неверные попытки считаются по адресу: перебор упирается в лимит."""
+    got = h.headers.get("X-Beat", "")
+    if ip and rl_auth.over("bad:" + ip):
+        return False
+    if BEAT_SECRET and got and hmac.compare_digest(got.encode("utf-8", "replace"), BEAT_SECRET.encode("utf-8")):
+        return True
+    if got and ip:
+        rl_auth.allow("bad:" + ip)
+    return False
+
+
 def web_health(h, ip):
-    """Состояние хаба для наблюдателя: свободное место и память, возраст последней копии, сколько серверов проекта активны."""
+    """Состояние хаба для наблюдателя: свободное место и память, возраст последней копии, сколько серверов проекта активны.
+    Без секрета наблюдателя отдаём только то, что и так видно на сайте (жив ли хаб, пишет ли в базу, сколько серверов на связи)."""
     ok, retry = rl_stats.allow(ip or "local")
     if not ok:
         return h.err(429, "слишком часто", retry)
     now = time.time()
+    if not _beat_ok(h, ip):
+        alive = sum(1 for t in TARGETS if now - TARGET_SEEN.get(t["code"], 0) < 90)
+        return h.send_json(200, {"ok": True, "db_ok": _db_writable(), "anchors_online": alive, "anchors_total": len(TARGETS)})
     try:
         du = shutil.disk_usage(os.path.dirname(HUB_DB) or "/")
         disk = int(du.free * 100 / max(1, du.total))
@@ -1718,7 +1738,7 @@ def web_health(h, ip):
 
 
 def web_beat(h, body):
-    if not BEAT_SECRET or not hmac.compare_digest(h.headers.get("X-Beat", ""), BEAT_SECRET):
+    if not _beat_ok(h, h.client_ip()):
         return h.err(403, "неверный секрет")
     BEAT["last"] = time.time()
     return h.send_json(200, {"ok": True})
@@ -1743,7 +1763,7 @@ def _name_flags(name):
 def names_review(h, method, body):
     """Для наблюдателя: новые (или переименованные) провайдеры, о которых ещё не сообщали, с пометками подозрительных названий.
     GET отдаёт список, POST {"asns": [...]} отмечает их как «сообщили» (после успешной отправки). Доступ по секрету наблюдателя."""
-    if not BEAT_SECRET or not hmac.compare_digest(h.headers.get("X-Beat", ""), BEAT_SECRET):
+    if not _beat_ok(h, h.client_ip()):
         return h.err(403, "неверный секрет")
     now = int(time.time())
     if method == "POST":

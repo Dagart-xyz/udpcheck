@@ -342,6 +342,16 @@ class RateLimiter:
         q.append(now)
         return True, 0
 
+    def over(self, key, now=None):
+        """Исчерпан ли лимит по ключу (без учёта нового события)."""
+        now = time.time() if now is None else now
+        q = self.hits.get(key)
+        if not q:
+            return False
+        while q and q[0] <= now - self.window:
+            q.popleft()
+        return len(q) >= self.limit
+
     def purge(self, now=None):
         now = time.time() if now is None else now
         for key in [k for k, q in self.hits.items() if not q or q[-1] <= now - self.window]:

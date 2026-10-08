@@ -51,8 +51,8 @@ def up(timeout=15):
     return False
 
 
-def get(path):
-    return json.load(urllib.request.urlopen(HUB + path, timeout=5))
+def get(path, headers=None):
+    return json.load(urllib.request.urlopen(urllib.request.Request(HUB + path, headers=headers or {}), timeout=5))
 
 
 def watch(**extra):
@@ -67,10 +67,13 @@ proc = start()
 try:
     check("хаб поднялся", up())
     time.sleep(6)          # цель RU-T успевает опросить хаб
-    h = get("/api/v2/health")
+    h = get("/api/v2/health", {"X-Beat": BEAT})
     check("health: место, память, возраст копии, число активных серверов", h.get("ok") and h["disk_free_pct"] is not None and h["backup_age_s"] is not None
           and h["anchors_total"] == 2 and h["anchors_online"] == 1, h)
     check("health: хаб пишет в базу (db_ok)", h.get("db_ok") is True, h)
+    ha = get("/api/v2/health")
+    check("health без секрета: только жив ли хаб, база и число серверов (без диска, памяти, возраста копии)",
+          ha.get("ok") and ha.get("db_ok") is True and ha.get("anchors_total") == 2 and not {"disk_free_pct", "mem_avail_mb", "backup_age_s", "uptime_s"} & set(ha), ha)
     try:
         urllib.request.urlopen(urllib.request.Request(HUB + "/api/v2/health/beat", data=b"", method="POST", headers={"X-Beat": "x" * 32}), timeout=5)
         check("сигнал жизни с неверным секретом отклонён", False)

@@ -227,7 +227,7 @@ def run():
     nodes = health = None
     try:
         nodes = http("/api/v2/nodes")
-        health = http("/api/v2/health")
+        health = http("/api/v2/health", headers={"X-Beat": BEAT_SECRET} if BEAT_SECRET else None)
     except Exception:
         pass
     hub_bad = nodes is None or health is None or not health.get("ok")

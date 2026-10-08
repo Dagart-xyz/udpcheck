@@ -26,6 +26,17 @@
 }
 
 dagart.xyz {
+	# Сжатие страниц и JSON (страница 97 КБ, список провайдеров 62 КБ) и защитные заголовки для всех ответов, включая API
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()"
+		Cross-Origin-Opener-Policy same-origin
+		-Server
+	}
+
 	# Хаб: API проекта (старый префикс /udpcheck оставлен для уже установленных узлов и целей)
 	handle /udpcheck/* {
 		import hub
@@ -38,11 +49,9 @@ dagart.xyz {
 	handle {
 		root * /var/www/udpcheck-site
 		header {
-			X-Content-Type-Options nosniff
-			Referrer-Policy no-referrer
 			# страницу браузер каждый раз сверяет с сервером (иначе у посетителей остаётся старая версия); картинки кэшируются ниже
 			Cache-Control no-cache
-			Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+			Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 		}
 		rewrite /i /install-node.sh
 		# страницы документов без расширения

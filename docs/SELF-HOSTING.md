@@ -106,7 +106,8 @@ UDPCHECK_TARGET_TCP_PORT=8443
 На публичном сервере сразу видны сканеры (на нашем хабе около 800 неудачных попыток входа по SSH в сутки). Минимум, который мы ставим, без журналов адресов посетителей:
 - вход по SSH только по ключам (`PasswordAuthentication no`) и `fail2ban` с нарастающим баном (`ops/hardening/fail2ban-udpcheck.local` в `/etc/fail2ban/jail.d/` и `fail2ban-db.local` в `/etc/fail2ban/fail2ban.d/`): час, потом 2, 4, 8, 16, 32, 64 часа, потолок 4 недели; на Ubuntu юнит называется `ssh.service`. Снять бан: `fail2ban-client unban <адрес>`;
 - `ops/hardening/udpcheck-guard.nft` (хаб) и `udpcheck-guard-anchor.nft` (опорный сервер без веб-сервера): ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти. Новые версии nft показывают счётчики как динамические множества (`set ssh4 {...}`): смотрите `nft list table inet udpcheck_guard`;
-- `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса;
+- `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса, сжатие ответов, HSTS, `Permissions-Policy` и строгий CSP;
+- `ops/hardening/journald-udpcheck.conf` в `/etc/systemd/journald.conf.d/`: системный журнал не дольше 30 суток (в нём попытки входа по SSH; это единственное место, где остаются адреса, и политика данных об этом говорит);
 - автообновления безопасности (`unattended-upgrades`).
 Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.
 
