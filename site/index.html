@@ -101,6 +101,8 @@ footer{padding:28px 0 48px;color:var(--muted);font-size:13px;border-top:1px soli
 .err{color:var(--bad)}
 .cutline{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:3px 0}
 .cutline .k{font-size:12px;color:var(--muted);min-width:78px}
+.cutline .sname{font-weight:600;font-size:14px}
+.cutline .full{flex-basis:100%}
 .nodegrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-top:12px}
 .node{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface2)}
 .node b{display:block;font-size:15px;overflow-wrap:anywhere}
@@ -182,7 +184,7 @@ button.btn.ghost{border:1px solid var(--line)}
   <section id="providers">
     <h2>Провайдеры</h2>
     <p class="muted small" style="margin:-6px 0 12px">Статус по замерам узлов и проверкам посетителей за последние 6 часов. График показывает долю замеров, где UDP из-за рубежа не проходит. Нажмите на карточку: подробный график, итоги по серверам и маршруты. Карточка провайдера появляется сама, как только в его сети сделают проверку или заработает узел.</p>
-    <div class="psearch"><input id="psearch" type="search" placeholder="Найти провайдера: название или номер AS" autocomplete="off" aria-label="Найти провайдера"></div>
+    <div class="psearch"><input id="psearch" type="search" placeholder="Найти: название или номер AS" autocomplete="off" aria-label="Найти провайдера"></div>
     <div class="pgrid" id="pgrid"><div class="muted small">Загружаю…</div></div>
     <div class="pmore" id="pmore" hidden></div>
     <details id="hostbox" style="margin-top:14px" hidden>
@@ -470,11 +472,11 @@ function renderWeb(state){
     var row = el("div", "cutline");
     var cls = r.ok === 0 ? "dead" : (r.ok >= r.n * 0.8 ? "reach" : "dead");
     row.appendChild(el("span", "k", isHome(r.kind) ? "в вашей стране" : "из-за рубежа"));
-    row.appendChild(el("span", null, r.name + ": "));
+    row.appendChild(el("span", "sname", r.name));
     row.appendChild(el("b", cls, "ответов " + r.ok + " из " + r.n));
     if (r.community) row.appendChild(el("span", "muted small", "свидетель: сам вывод не определяет"));
-    if (seenKnown(r) && !isHome(r.kind) || (seenKnown(r) && r.ok < r.n)) row.appendChild(el("span", "muted small", r.seen > 0 ? (r.replied > 0 && r.ok < r.n ? "входящий UDP от этого сервера до вас не доходит: он получил ваши запросы и отправил ответы" : "сервер ваши запросы получил") : "исходящий UDP до этого сервера не доходит: запросы не дошли"));
-    if (r.pad && r.pad.length) row.appendChild(el("span", "muted small", "длинные ответы: " + r.pad.map(function(p){ return p.size + " Б: " + p.ok + " из " + p.n; }).join(", ")));
+    if (seenKnown(r) && !isHome(r.kind) || (seenKnown(r) && r.ok < r.n)) row.appendChild(el("span", "muted small full", r.seen > 0 ? (r.replied > 0 && r.ok < r.n ? "входящий UDP от этого сервера до вас не доходит: он получил ваши запросы и отправил ответы" : "сервер ваши запросы получил") : "исходящий UDP до этого сервера не доходит: запросы не дошли"));
+    if (r.pad && r.pad.length) row.appendChild(el("span", "muted small full", "длинные ответы: " + r.pad.map(function(p){ return p.size + " Б: " + p.ok + " из " + p.n; }).join(", ")));
     tb.appendChild(row);
   });
   box.appendChild(tb);

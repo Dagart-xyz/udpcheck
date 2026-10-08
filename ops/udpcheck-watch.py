@@ -11,6 +11,7 @@
 Ключи для запуска:  (без ключей)  одна проверка;  --test  тестовое сообщение;  --find-chat  показать id чата после /start боту;  --status  состояние.
 Только стандартная библиотека. Если не настроен ни один канал, сообщения печатаются на экран (так же работают тесты).
 """
+import calendar
 import json
 import os
 import sys
@@ -29,6 +30,8 @@ QUIET_FROM, QUIET_TO = int(os.environ.get("QUIET_FROM", "23")), int(os.environ.g
 QUIET_CRITICAL = os.environ.get("QUIET_CRITICAL", "0") == "1"      # 1: падение хаба будит и ночью
 FAILS_HUB, FAILS_ANCHOR = 3, 5                                      # сколько минут подряд, прежде чем сообщить
 REMIND = 6 * 3600
+EXPIRY = [x.strip() for x in os.environ.get("WATCH_EXPIRY", "").split(",") if "=" in x]     # "Имя сервера=2026-11-05,Другой=2026-10-13": когда кончается аренда
+EXPIRY_HOUR = int(os.environ.get("EXPIRY_HOUR", "10"))                # во сколько по Москве напоминать
 NAMES_HOUR = int(os.environ.get("NAMES_HOUR", "19"))                  # во сколько по Москве присылать разбор названий провайдеров
 NAMES_EVERY_DAYS = int(os.environ.get("NAMES_EVERY_DAYS", "1"))       # как часто (потом можно поставить 7)
 
@@ -143,6 +146,39 @@ def check(st, name, bad, need, down_text, up_text, critical=False):
         c.update(fail=0, alerted=False)
 
 
+def expiry_check(st):
+    """Напоминания об окончании аренды серверов: за 7, 3 и 1 день, в день окончания и на следующий день. Список в WATCH_EXPIRY."""
+    t = now()
+    if not EXPIRY or not (EXPIRY_HOUR <= msk_hour(t) < EXPIRY_HOUR + 3):
+        return
+    today = int((t + 3 * 3600) // 86400)
+    sent = st.setdefault("expiry_sent", {})
+    for item in EXPIRY:
+        name, _eq, date = item.partition("=")
+        try:
+            end = calendar.timegm(time.strptime(date.strip(), "%Y-%m-%d")) // 86400
+        except ValueError:
+            continue
+        left = end - today
+        if left not in (7, 3, 1, 0, -1):
+            continue
+        key = "%s|%s|%d" % (name.strip(), date.strip(), left)
+        if key in sent:
+            continue
+        if left > 1:
+            text = "Аренда сервера «%s» заканчивается через %d дн. (%s). Продлите, иначе он пропадёт из проверок." % (name.strip(), left, date.strip())
+        elif left == 1:
+            text = "Аренда сервера «%s» заканчивается ЗАВТРА (%s)." % (name.strip(), date.strip())
+        elif left == 0:
+            text = "Аренда сервера «%s» заканчивается СЕГОДНЯ (%s)." % (name.strip(), date.strip())
+        else:
+            text = "Аренда сервера «%s» закончилась вчера (%s). Если не продлена, он скоро пропадёт." % (name.strip(), date.strip())
+        if deliver(text):
+            sent[key] = today
+    for k in [k for k, v in sent.items() if today - v > 30]:
+        del sent[k]
+
+
 def names_digest(st):
     """Раз в NAMES_EVERY_DAYS дней в NAMES_HOUR по Москве: новые провайдеры и подозрительные названия, чтобы поправить базу имён."""
     t = now()
@@ -214,6 +250,7 @@ def run():
             check(st, "disk", df < 10, 1, "на хабе мало места на диске (свободно %d%%)." % df, "места на диске хаба снова достаточно")
         if ma is not None:
             check(st, "mem", ma < 50, 3, "на хабе заканчивается память (доступно %d МБ)." % ma, "память хаба снова в порядке")
+    expiry_check(st)
     names_digest(st)
     flush(st)
     save(st)

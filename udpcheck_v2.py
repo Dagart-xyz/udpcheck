@@ -295,8 +295,9 @@ def trace_poller_loop():
         try:
             r = _signed_post("/api/v2/target/poll", {"ts": int(time.time()), "ack": got, "pad": {str(p): n for p, n in S.PAD_BOUND.items()}}, 40)
             backoff = 3
-            got = [str(j.get("id", "")) for j in (r.get("jobs") or [])[:8]]
-            for job in (r.get("jobs") or [])[:8]:
+            jobs = sorted((r.get("jobs") or [])[:300], key=lambda j: 0 if j.get("kind") == "pad" else 1)      # быстрые разрешения длинных ответов первыми
+            got = [str(j.get("id", "")) for j in jobs]
+            for job in jobs:
                 if job.get("kind") == "pad":                   # хаб подтвердил посетителя: можно отвечать ему длинными пакетами
                     S.pad_allow(str(job.get("ip", "")))
                     continue
@@ -1956,7 +1957,7 @@ def target_poll(h, body):
         req = json.loads(body.decode("utf-8"))
         if abs(int(req.get("ts", 0)) - time.time()) > 180:
             return h.err(403, "устаревший запрос")
-        acks = {str(x) for x in (req.get("ack") or [])[:50]}
+        acks = {str(x) for x in (req.get("ack") or [])[:400]}
         pad = {int(p): max(100, min(int(n), 1400)) for p, n in list((req.get("pad") or {}).items())[:4]}
     except (ValueError, TypeError, AttributeError):
         return h.err(400, "некорректный запрос")
@@ -2089,7 +2090,7 @@ def web_stunseen_start(h, ip):
         return h.err(503, "серверы не настроены")
     sid = secrets.token_hex(8)
     with HLOCK:
-        if len(SEEN) >= 200:
+        if len(SEEN) >= 3000:
             return h.err(503, "сервер занят, повторите позже", 30)
         SEEN[sid] = {"ip": ip, "created": time.time(), "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
     return h.send_json(202, {"id": sid})
@@ -2188,7 +2189,7 @@ def web_stun(h, ip):
         jid = secrets.token_hex(8)
         want = [t["code"] for t in TARGETS if TARGET_PAD.get(t["code"])]
         with HLOCK:
-            if len(PADS) < 200:
+            if len(PADS) < 3000:
                 PADS[jid] = {"ip": ip, "created": time.time(), "targets": {c: None for c in want}, "sent": {}}
         end = time.time() + 3.5
         while jid in PADS and time.time() < end:

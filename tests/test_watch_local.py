@@ -132,6 +132,18 @@ try:
     check("в тот же день повторно разбор не приходит", "Названия провайдеров" not in out, out)
     rv = json.load(urllib.request.urlopen(urllib.request.Request(HUB + "/api/v2/names/review", headers={"X-Beat": BEAT}), timeout=10))
     check("после отправки сети отмечены как «сообщили»", not ({777101, 777102, 777103} & {i["asn"] for i in rv["items"]}), rv)
+
+    print("[напоминания об окончании аренды]")
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600))
+    in_days = lambda n: time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600 + n * 86400))
+    exp = "Сервер-А=%s,Сервер-Б=%s,Сервер-В=%s" % (in_days(3), in_days(5), in_days(0))
+    out = watch(WATCH_HOUR_MSK="12", WATCH_EXPIRY=exp)
+    check("за 3 дня и в день окончания напоминание приходит", "Сервер-А" in out and "через 3 дн." in out and "Сервер-В" in out and "СЕГОДНЯ" in out, out)
+    check("за 5 дней напоминания нет", "Сервер-Б" not in out, out)
+    out = watch(WATCH_HOUR_MSK="12", WATCH_EXPIRY=exp)
+    check("повторно в тот же день не напоминает", "Сервер-А" not in out and "Сервер-В" not in out, out)
+    out = watch(WATCH_HOUR_MSK="3", WATCH_EXPIRY="Сервер-Г=%s" % in_days(1))
+    check("ночью (03:00) напоминаний нет", "Сервер-Г" not in out, out)
 finally:
     if proc.poll() is None:
         proc.kill()
