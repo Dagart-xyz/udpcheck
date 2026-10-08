@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# История банов хранится 30 суток: по ней считается нарастание срока для повторных нарушителей.
+[Definition]
+dbpurgeage = 30d
