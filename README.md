@@ -3,6 +3,11 @@
 Сервис, который показывает, режет ли ваш интернет-провайдер входящий UDP из-за рубежа, в какую сторону, и даёт доказательства для техподдержки.
 Рабочая версия: https://dagart.xyz
 
+> **In short (English):** UDPcheck tells you whether your ISP drops inbound foreign UDP, in which direction (your packets out, or replies back),
+> and produces evidence you can show to support. It consists of a hub, anchor servers, an optional node agent and a browser check (WebRTC/STUN).
+> Pure Python standard library, no logs of visitor IPs, AGPL-3.0-or-later. Running instance: https://dagart.xyz. Docs are mostly in Russian;
+> see [PROTOCOL.md](PROTOCOL.md) and [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
+
 ## Как это устроено
 
 - **Хаб** (`udpcheck_v2.py`, роль «хаб»): принимает проверки, хранит их в SQLite, отдаёт страницу, список провайдеров, журнал и API.
