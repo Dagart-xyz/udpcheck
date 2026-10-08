@@ -70,6 +70,7 @@ try:
     h = get("/api/v2/health")
     check("health: место, память, возраст копии, число активных серверов", h.get("ok") and h["disk_free_pct"] is not None and h["backup_age_s"] is not None
           and h["anchors_total"] == 2 and h["anchors_online"] == 1, h)
+    check("health: хаб пишет в базу (db_ok)", h.get("db_ok") is True, h)
     try:
         urllib.request.urlopen(urllib.request.Request(HUB + "/api/v2/health/beat", data=b"", method="POST", headers={"X-Beat": "x" * 32}), timeout=5)
         check("сигнал жизни с неверным секретом отклонён", False)

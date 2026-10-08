@@ -1676,6 +1676,16 @@ def beat_watch(now):
             BEAT["alerted"] = False
 
 
+def _db_writable():
+    """Хаб умеет писать в базу? (после переноса базы файл мог остаться у root, и все записи молча падали с ошибкой 500)"""
+    try:
+        db_exec("CREATE TABLE IF NOT EXISTS hubmeta(k TEXT PRIMARY KEY, v TEXT)")
+        db_exec("INSERT OR REPLACE INTO hubmeta(k, v) VALUES('health', ?)", (str(int(time.time())),))
+        return True
+    except Exception:
+        return False
+
+
 def web_health(h, ip):
     """Состояние хаба для наблюдателя: свободное место и память, возраст последней копии, сколько серверов проекта активны."""
     ok, retry = rl_stats.allow(ip or "local")
@@ -1702,7 +1712,7 @@ def web_health(h, ip):
     except (OSError, ValueError):
         pass
     alive = sum(1 for t in TARGETS if now - TARGET_SEEN.get(t["code"], 0) < 90)
-    return h.send_json(200, {"ok": True, "uptime_s": int(now - T0), "disk_free_pct": disk, "mem_avail_mb": mem, "backup_age_s": bage,
+    return h.send_json(200, {"ok": True, "db_ok": _db_writable(), "uptime_s": int(now - T0), "disk_free_pct": disk, "mem_avail_mb": mem, "backup_age_s": bage,
                              "anchors_online": alive, "anchors_total": len(TARGETS),
                              "watcher_beat_age_s": int(now - BEAT["last"]) if BEAT["last"] else None})
 

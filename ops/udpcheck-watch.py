@@ -242,6 +242,8 @@ def run():
         for a in nodes.get("anchors", []):
             check(st, "anchor:" + a["code"], settled and not a.get("online"), FAILS_ANCHOR,
                   "сервер проекта «%s» не опрашивает хаб больше %d мин." % (a["name"], FAILS_ANCHOR), "сервер проекта «%s» снова на связи" % a["name"])
+        check(st, "db", health.get("db_ok") is False, 2, "хаб не может писать в базу (проверки посетителей и узлы не сохраняются). Частая причина: после "
+              "переноса файл базы остался у root, нужен chown -R на каталог состояния.", "хаб снова пишет в базу", critical=True)
         ba = health.get("backup_age_s")
         if ba is not None:
             check(st, "backup", ba > 36 * 3600, 1, "последняя резервная копия хаба старше 36 часов (%d ч)." % (ba // 3600), "резервная копия снова свежая")
