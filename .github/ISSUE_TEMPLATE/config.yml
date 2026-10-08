@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Сообщить об уязвимости (приватно)
+    url: https://github.com/Dagart-xyz/udpcheck/security/advisories/new
+    about: Уязвимости не публикуйте в задачах: сообщите приватно, мы исправим и расскажем о ней потом.

@@ -38,6 +38,7 @@
 | `site/` | страница, скрипт диагностики, документация протокола |
 | `ops/` | скрипты для сервера: резервные копии, обновление баз GeoIP, оповещения |
 | `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | лицензия, сторонние данные, принципы приватности, уязвимости, как помочь |
+| `docs/SELF-HOSTING.md` | как запустить свой хаб, опорные серверы и узлы |
 | `tests/` | тесты (запуск: `python tests/test_v2_local.py` и остальные `test_*.py`) |
 | `add_target.py`, `add_logo.py` | подключение опорного сервера, логотип провайдера |
 
@@ -70,4 +71,4 @@ draldrean@protonmail.com
 его данные дальше сайта). Подробнее о том, что и как мы берём у посетителей: [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
 
 Название «UDPcheck» и домен dagart.xyz относятся к официальному экземпляру: копиям и изменённым версиям просим давать другое имя
-(см. [NOTICE](NOTICE)). Как помочь: [CONTRIBUTING.md](CONTRIBUTING.md). Об уязвимостях: [SECURITY.md](SECURITY.md).
+(см. [NOTICE](NOTICE)). Как помочь: [CONTRIBUTING.md](CONTRIBUTING.md), правила общения: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Свой хаб: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). Об уязвимостях: [SECURITY.md](SECURITY.md).

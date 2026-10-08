@@ -1,0 +1,26 @@
+name: Ошибка или неверный результат
+description: Что-то работает не так, неверное название провайдера, странный вывод
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо! **Не указывайте здесь свои IP-адреса, токены и ключи**: замените на `203.0.113.x`. Об уязвимостях пишите не сюда, а
+        через вкладку Security → Report a vulnerability (приватно).
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что вы делали, что ожидали, что получили
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Где
+      description: Страница сайта, номер сети (AS), версия агента или дата выкладки
+  - type: textarea
+    id: extra
+    attributes:
+      label: Дополнительно
+      description: Браузер и система, вывод агента или скрипта диагностики (site/diag.sh, он маскирует адреса)
