@@ -15,6 +15,7 @@ import hmac
 import ipaddress
 import json
 import os
+import queue
 import random
 import re
 import secrets
@@ -761,7 +762,7 @@ def _geo_of(ip):
     country = g.get("country")
     if not country and S.ALLOW_NON_GLOBAL and ip:          # режим разработки: адреса из частных сетей
         country = next((c for pfx, c in DEV_COUNTRIES if ip.startswith(pfx)), None) or DEFAULT_COUNTRY or None
-    return g.get("asn"), g.get("org"), country, g.get("city")
+    return g.get("asn"), _store_org(g.get("org")), country, g.get("city")
 
 
 def node_register(h, ip, body):
@@ -1120,7 +1121,7 @@ def node_result(h, ip, body):
                 and (S.is_public(task["ip"]) or S.ALLOW_NON_GLOBAL) and TARGETS):
             LAST_NODE_TRACE[row[0]] = time.time()
             g = S.GEO.lookup(task["ip"]) or {}
-            WTRACES[secrets.token_hex(8)] = {"ip": task["ip"], "asn": g.get("asn"), "org": g.get("org"), "src": "node",
+            WTRACES[secrets.token_hex(8)] = {"ip": task["ip"], "asn": g.get("asn"), "org": _store_org(g.get("org")), "src": "node",
                                              "country": _geo_of(task["ip"])[2], "created": time.time(), "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
     return h.send_json(200, {"round": rid, "verdict": {"code": vcode, "text": vtext}, "targets": out_targets,
                              "src_same": same, "attribution": S.GEO_ATTRIBUTION})
@@ -1240,13 +1241,44 @@ LEGAL_TOKENS = {"pjsc", "ojsc", "cjsc", "jsc", "llc", "ooo", "oao", "zao", "pao"
                 "sia", "llp", "fzco", "sas", "plc", "co", "sa", "spa", "ab", "the", "sl", "sro", "kft", "oy"}
 GENERIC_NAMES = {"retail", "hosting services", "uplinks", "telecommunication business", "customer", "customers", "internet", "network", "networks",
                  "telecom", "hosting", "cloud", "isp", "datacenter", "data center", "transit", "backbone", "default", "services", "service"}
-PERSON_RE = re.compile(r"(?i)individual\s+entrepreneur|sole\s+proprietor|private\s+person|^ie\s|^ип\s|индивидуальный\s+предприниматель|"
+PERSON_RE = re.compile(r"(?i)individual\s+entrepreneur|sole\s+proprietor|private\s+person|^ie\s|^ип\s|индивидуальный\s+предприниматель|частное\s+лицо|"
                        r"\b\w+(?:evich|ovich|yevich|evna|ovna|yevna)\b")           # отчество в названии: сеть записана на человека
 STOPWORDS = {"for", "of", "the", "and", "in", "on", "at", "to"}
 
 
 def _is_person(text):
     return bool(text and PERSON_RE.search(str(text)))
+
+
+# Слова, по которым видно, что это не имя человека. Организация из whois без правовой формы и без таких слов, из двух-трёх слов с большой буквы
+# («Alexey Geiner», «Иван Петров»), считается физическим лицом: публично его не называем.
+BUSINESS_WORDS = set("""telecom telecommunication telecommunications communications communication network networks net internet online host hosting cloud data datacenter
+center centre group holding systems system service services solutions technologies technology tech digital link web server servers cable wifi radio media soft software
+bank university institute state company corporation business global international security labs lab connect broadband vpn vps mobile wireless fiber fibre electric power
+energy trade trading consulting capital logistics partners industries enterprise enterprises foundation association agency studio project research science education
+school college academy city region regional telephone transit backbone infrastructure platform interactive video tv hotel club cyber computer computers info informatics
+electronics electronic engineering development networking""".split())
+_PERSON_WORD = re.compile(r"[A-Z][a-z]{1,20}(-[A-Z][a-z]{1,20})?|[А-ЯЁ][а-яё]{1,20}")
+
+
+def looks_like_person_org(text):
+    t = str(text or "").strip()
+    if not t or re.search(r"[\d@/_&.,:;()\"'«»+=]", t):
+        return False
+    words = t.split()
+    if not 2 <= len(words) <= 3 or not all(_PERSON_WORD.fullmatch(w) for w in words):
+        return False
+    low = {w.lower() for w in words}
+    return not (low & LEGAL_TOKENS or low & BUSINESS_WORDS)
+
+
+def _is_person_org(org):
+    return _is_person(org) or looks_like_person_org(org)
+
+
+def _store_org(org):
+    """В базу название организации из whois кладём, только если это не физическое лицо: вместо имени человека хранится «Частное лицо»."""
+    return "Частное лицо" if org and _is_person_org(org) else org
 
 
 def clean_name(text):
@@ -1333,7 +1365,7 @@ def public_org(asn, org):
     """Название организации для показа: частных лиц (ИП и подобное) публично не называем."""
     o = org or _org_of(asn)
     _load_names()
-    return None if (not o or _is_person(o) or _is_person(_asn_name(asn)) or str(_names["data"].get(str(asn), "")).startswith("Частный")) else o
+    return None if (not o or _is_person_org(o) or _is_person(_asn_name(asn)) or str(_names["data"].get(str(asn), "")).startswith("Частный")) else o
 
 
 def provider_group(asn, org=None):
@@ -1344,7 +1376,7 @@ def provider_group(asn, org=None):
     desc = _asn_name(asn)
     if _names["data"].get(str(asn)):
         name = _names["data"][str(asn)]
-    elif _is_person(org) or _is_person(desc):
+    elif _is_person_org(org) or _is_person(desc):
         return ("asn:%d" % asn, "Частный провайдер AS%d" % asn)
     else:
         c1, c2 = clean_name(desc), clean_name(org)
@@ -1421,6 +1453,35 @@ def _asn_fetch(asn):
         pass
 
 
+_fetchq = queue.Queue(maxsize=3000)
+_fetch_state = {"thread": None}
+_fetch_lock = threading.Lock()
+
+
+def _fetch_worker():
+    """Один фоновый поток ходит за названиями и типами сетей (RIPEstat, PeeringDB) по очереди и неторопливо. Раньше на каждую сеть запускался свой поток:
+    при холодном кэше после перезапуска их набиралось больше лимита службы (TasksMax) и список провайдеров отвечал 500."""
+    while True:
+        fn, asn = _fetchq.get()
+        try:
+            fn(asn)
+        except Exception:
+            pass
+        time.sleep(0.25)
+
+
+def _enqueue_fetch(fn, asn):
+    with _fetch_lock:
+        if _fetch_state["thread"] is None:
+            t = threading.Thread(target=_fetch_worker, daemon=True)
+            t.start()
+            _fetch_state["thread"] = t
+    try:
+        _fetchq.put_nowait((fn, asn))
+    except queue.Full:
+        pass
+
+
 def _asn_name(asn):
     if asn in _asn_cache:
         return _asn_cache[asn]
@@ -1432,7 +1493,7 @@ def _asn_name(asn):
     now = time.time()
     if now - _asn_try.get(asn, 0) > 3600 and len(_asn_try) < 5000:
         _asn_try[asn] = now
-        threading.Thread(target=_asn_fetch, args=(asn,), daemon=True).start()
+        _enqueue_fetch(_asn_fetch, asn)
     return _asn_cache.get(asn, "")
 
 
@@ -1471,7 +1532,7 @@ def _pdb_type(asn):
     now = time.time()
     if now - _meta_try.get(asn, 0) > 3600 and len(_meta_try) < 5000:
         _meta_try[asn] = now
-        threading.Thread(target=_pdb_fetch, args=(asn,), daemon=True).start()
+        _enqueue_fetch(_pdb_fetch, asn)
     return _meta_cache.get(asn, ("", "", ""))
 
 
@@ -1770,19 +1831,22 @@ def web_beat(h, body):
     return h.send_json(200, {"ok": True})
 
 
-def _name_flags(name):
+def _name_flags(name, asn=None):
     """Что в названии провайдера выглядит подозрительно (для ежедневного разбора названий)."""
     f = []
     if re.fullmatch(r"AS\d+", name):
         f.append("название не нашлось, показан номер")
     if name.endswith("…"):
         f.append("название обрезано")
-    elif len(name) > 30:
+    elif len(name) > 36:
         f.append("длинное название")
-    if any(len(w) >= 4 and w.isalpha() and w.isupper() for w in name.split()):
+    if any(len(w) >= 6 and w.isalpha() and w.isupper() for w in name.split()):
         f.append("осталось капсом")
-    if re.search(r"[^\w\s.\-&()'+]", name):
+    if re.search(r"[^\w\s.\-&()'+]", name) or name.strip("()^ =-") != name:
         f.append("странные символы")
+    org = _org_of(asn) if asn is not None else None
+    if looks_like_person_org(org) and not name.startswith("Частный"):
+        f.append("в организации похоже на имя человека: проверьте, не физлицо ли")
     return f
 
 
@@ -1810,7 +1874,7 @@ def names_review(h, method, body):
         if done.get(a) == name:
             continue
         org = public_org(a, None)
-        items.append({"asn": a, "name": name, "org": org, "kind": provider_kind(a, org, name), "flags": _name_flags(name), "group": len(group_members(a))})
+        items.append({"asn": a, "name": name, "org": org, "kind": provider_kind(a, org, name), "flags": _name_flags(name, a), "group": len(group_members(a))})
     items.sort(key=lambda x: (not x["flags"], x["asn"]))
     return h.send_json(200, {"total": len(items), "items": items[:200]})
 
@@ -2334,7 +2398,7 @@ def web_report(h, ip, body):
         return h.send_json(200, {"ok": True, "counted": False})
     g = (S.GEO.lookup(ip) or {}) if ip else {}
     db_exec("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)",
-            (int(time.time()), g.get("asn"), verdict, json.dumps(clean), g.get("org"), cid))
+            (int(time.time()), g.get("asn"), verdict, json.dumps(clean), _store_org(g.get("org")), cid))
     return h.send_json(200, {"ok": True, "counted": True})
 
 
@@ -2383,7 +2447,7 @@ def web_trace_start(h, ip):
         if len(WTRACES) >= 200:
             return h.err(503, "сервер занят, повторите позже", 30)
         g = S.GEO.lookup(ip) or {}
-        WTRACES[wid] = {"ip": ip, "asn": g.get("asn"), "org": g.get("org"), "src": "web", "country": _geo_of(ip)[2], "created": time.time(),
+        WTRACES[wid] = {"ip": ip, "asn": g.get("asn"), "org": _store_org(g.get("org")), "src": "web", "country": _geo_of(ip)[2], "created": time.time(),
                         "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
     vc = _geo_of(ip)[2]
     return h.send_json(202, {"id": wid, "targets": [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"]} for t in TARGETS]})

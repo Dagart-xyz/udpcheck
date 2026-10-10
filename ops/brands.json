@@ -1,14 +1,93 @@
 [
-  {"name": "Ростелеком", "match": ["rostelecom", "ростелеком"]},
-  {"name": "Дом.ру (ЭР-Телеком)", "match": ["er-telecom", "er telecom", "ertelecom", "эр-телеком"]},
-  {"name": "МегаФон", "match": ["megafon", "мегафон"]},
-  {"name": "МТС", "match": ["\\bmts\\b", "\\bмтс\\b"]},
-  {"name": "Билайн (ВымпелКом)", "match": ["vimpelcom", "beeline", "вымпелком"]},
-  {"name": "Т2 (Tele2)", "match": ["t2 mobile", "\\bt2\\b"]},
-  {"name": "МГТС", "match": ["moscow city telephone", "мгтс"]},
-  {"name": "Таттелеком", "match": ["tattelecom", "таттелеком"]},
-  {"name": "ТТК", "match": ["ttk-svy", "transtelecom", "\\bttk\\b"]},
-  {"name": "Мегалайн", "match": ["megaline"]},
-  {"name": "Акадо", "match": ["akado"]},
-  {"name": "Ситилинк", "match": ["citylink"]}
+ {
+  "name": "Ростелеком",
+  "match": [
+   "rostelecom",
+   "ростелеком"
+  ]
+ },
+ {
+  "name": "Дом.ру (ЭР-Телеком)",
+  "match": [
+   "er-telecom",
+   "er telecom",
+   "ertelecom",
+   "эр-телеком"
+  ]
+ },
+ {
+  "name": "МегаФон",
+  "match": [
+   "megafon",
+   "мегафон"
+  ]
+ },
+ {
+  "name": "МТС",
+  "match": [
+   "\\bmts\\b",
+   "\\bмтс\\b"
+  ]
+ },
+ {
+  "name": "Билайн (ВымпелКом)",
+  "match": [
+   "vimpelcom",
+   "beeline",
+   "вымпелком"
+  ]
+ },
+ {
+  "name": "Т2 (Tele2)",
+  "match": [
+   "t2 mobile",
+   "\\bt2\\b"
+  ]
+ },
+ {
+  "name": "МГТС",
+  "match": [
+   "moscow city telephone",
+   "мгтс"
+  ]
+ },
+ {
+  "name": "Таттелеком",
+  "match": [
+   "tattelecom",
+   "таттелеком"
+  ]
+ },
+ {
+  "name": "ТТК",
+  "match": [
+   "ttk-svy",
+   "transtelecom",
+   "\\bttk\\b"
+  ]
+ },
+ {
+  "name": "Мегалайн",
+  "match": [
+   "megaline"
+  ]
+ },
+ {
+  "name": "Акадо",
+  "match": [
+   "akado"
+  ]
+ },
+ {
+  "name": "Ситилинк",
+  "match": [
+   "citylink"
+  ]
+ },
+ {
+  "name": "Datacamp",
+  "match": [
+   "datacamp"
+  ]
+ }
 ]

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import udpcheck_server as S
@@ -80,6 +81,29 @@ check("МегаФон отдельно от МТС", g(31213, "PJSC MegaFon")[0]
 check("SkyNet и Seven Sky не склеиваются", g(35807, "SkyNet Ltd.")[0] != g(29124, "Seven Sky")[0])
 check("частное лицо: публично имени нет, имя «Частный провайдер»", g(196949, "Natalia Sergeevna Filicheva")[1].startswith("Частный провайдер") and V.public_org(35420, "Individual Entrepreneur Lukyanov Maksim") is None)
 check("обычная организация показывается", V.public_org(35807, "SkyNet Ltd.") == "SkyNet Ltd.")
+
+print("[физические лица в организации]")
+for t, want in (("Alexey Geiner", True), ("Paul Sagov", True), ("Иван Петров", True), ("Tabunscic Anatoli", True), ("Baykov Ilya Sergeevich", True),
+                ("Home Internet", False), ("Orange Business Services", False), ("Microsoft Corporation", False), ("Hurricane Electric", False),
+                ("Digital Ocean", False), ("Owl Limited", False), ("PJSC MegaFon", False), ("Cloudflare", False), ("Telecommunication Business", False)):
+    check("похоже на человека? %s -> %s" % (t, want), V.looks_like_person_org(t) == want)
+json.dump({"196949": "Частный провайдер AS196949", "219095": "Astra VPS"}, open(os.path.join(tmp, "names.json"), "w", encoding="utf-8"), ensure_ascii=False)
+V._names["mtime"] = 0
+V._org_cache.update(t=time.time(), data={204161: "Alexey Geiner", 219095: "Paul Sagov", 8075: "Microsoft Corporation"})
+check("сеть на человека без подсказок: «Частный провайдер», имя не раскрыто", V.provider_name(204161, "Alexey Geiner") == "Частный провайдер AS204161")
+check("организация человека публично не показывается", V.public_org(204161, "Alexey Geiner") is None and V.public_org(219095, "Paul Sagov") is None)
+check("название из names.json приоритетнее (бренд, владелец физлицо)", V.provider_name(219095, "Paul Sagov") == "Astra VPS")
+check("обычная организация показывается", V.public_org(8075, "Microsoft Corporation") == "Microsoft Corporation")
+check("в разборе: сокращения (OBIT, НИИСИ РАН) не тревожат", not V._name_flags("OBIT") and not V._name_flags("НИИСИ РАН"))
+check("в разборе: «(^ ^)» и «==Vodocomfort==» помечаются", bool(V._name_flags("(^ ^)")) and bool(V._name_flags("==Vodocomfort==")))
+check("в разборе: имя человека в организации помечается", any("человека" in f for f in V._name_flags("Astra VPS", 204161)))
+check("в базу вместо имени человека кладётся «Частное лицо»", V._store_org("Alexey Geiner") == "Частное лицо" and V._store_org("Microsoft Corporation") == "Microsoft Corporation" and V._store_org(None) is None)
+check("«Частное лицо» дальше распознаётся как частное лицо", V.provider_name(204161, "Частное лицо") == "Частный провайдер AS204161")
+import threading
+n0 = threading.active_count()
+for i in range(500):
+    V._enqueue_fetch(lambda a: None, i)
+check("фоновые запросы названий идут одним потоком (500 заданий: не больше одного нового потока)", threading.active_count() - n0 <= 1, threading.active_count() - n0)
 
 print()
 print("ИТОГ: всё прошло" if not FAILS else "ИТОГ: ПРОВАЛЕНО %d" % len(FAILS))

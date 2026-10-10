@@ -29,6 +29,7 @@ import struct
 import subprocess
 import sys
 import threading
+import traceback
 import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -686,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             self.close_connection = True
         except Exception:
+            traceback.print_exc()            # в журнал службы (stderr): только трассировка ошибки в коде, без адресов и содержимого запросов
             try:
                 self.err(500, "внутренняя ошибка")
             except Exception:
