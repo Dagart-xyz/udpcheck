@@ -12,6 +12,7 @@
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import random
@@ -57,6 +58,7 @@ TARGET_ID = os.environ.get("UDPCHECK_TARGET_ID", "")
 _sec = os.environ.get("UDPCHECK_TARGET_SECRET", "")
 TARGET_SECRET = bytes.fromhex(_sec) if _sec else None
 HUB_URL = os.environ.get("UDPCHECK_HUB_URL", "").rstrip("/")
+HOST_FILE = os.environ.get("UDPCHECK_HOST_FILE", "/run/udpcheck-host.json")      # пишет ops/udpcheck-hostcheck.py (от root, раз в 5 минут)
 TARGET_TCP_PORT = int(os.environ.get("UDPCHECK_TARGET_TCP_PORT", "0") or 0)
 TEST_DROP_REPLY = os.environ.get("UDPCHECK_TEST_DROP_REPLY") == "1"      # только для тестов: принимать, но не отвечать
 
@@ -286,6 +288,18 @@ def _do_trace_job(job):
         pass
 
 
+def _host_info():
+    """Состояние сервера (нужна ли перезагрузка, обновления, баны, входы по SSH) для наблюдателя; файла нет: ничего не добавляем."""
+    try:
+        with open(HOST_FILE, encoding="utf-8") as fh:
+            d = json.loads(fh.read(4096))
+        if isinstance(d, dict) and time.time() - int(d.get("ts", 0)) < 1800:
+            return d
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
 def trace_poller_loop():
     """Цель сама спрашивает хаб, нет ли трассировок для посетителей сайта (исходящее соединение, как у узлов)."""
     slots = threading.BoundedSemaphore(2)
@@ -293,7 +307,11 @@ def trace_poller_loop():
     got = []                                              # id заданий из прошлого ответа: подтверждаем их в следующем опросе
     while True:
         try:
-            r = _signed_post("/api/v2/target/poll", {"ts": int(time.time()), "ack": got, "pad": {str(p): n for p, n in S.PAD_BOUND.items()}}, 40)
+            poll = {"ts": int(time.time()), "ack": got, "pad": {str(p): n for p, n in S.PAD_BOUND.items()}}
+            hi = _host_info()
+            if hi:
+                poll["host"] = hi
+            r = _signed_post("/api/v2/target/poll", poll, 40)
             backoff = 3
             jobs = sorted((r.get("jobs") or [])[:300], key=lambda j: 0 if j.get("kind") == "pad" else 1)      # быстрые разрешения длинных ответов первыми
             got = [str(j.get("id", "")) for j in jobs]
@@ -397,6 +415,7 @@ TARGET_PAD = {}              # код опорного сервера -> {пор
 SEEN = {}                    # id -> {ip, created, targets:{code: None|{порт: n}}, sent:set()}: «видели ли серверы STUN-запросы посетителя»
 JOURNAL_STATE = {"last": 0, "pending": {}}     # время последней сверки; кандидаты на смену статуса (нужно подтверждение следующей сверкой)
 SEEN_DONE = {}               # ip -> (время, {код сервера: сколько STUN-запросов он получил}): посетитель прошёл проверку через наши серверы
+HOST = {}                    # код сервера проекта -> {"seen": время получения, ...состояние сервера из ops/udpcheck-hostcheck.py}
 TARGET_SEEN = {}             # код опорного сервера проекта -> время последнего опроса хаба (они опрашивают хаб каждые ~20 с)
 REF_SEEN = {}                # node_id -> [день, множество id выданных опорных серверов участников]
 WTRACES = {}                 # id -> {ip, asn, org, src, created, targets:{code: None|результат}, sent:set()}
@@ -1738,8 +1757,9 @@ def web_health(h, ip):
     except (OSError, ValueError):
         pass
     alive = sum(1 for t in TARGETS if now - TARGET_SEEN.get(t["code"], 0) < 90)
+    hosts = {c: dict(v, age_s=int(now - v["seen"])) for c, v in list(HOST.items())}
     return h.send_json(200, {"ok": True, "db_ok": _db_writable(), "uptime_s": int(now - T0), "disk_free_pct": disk, "mem_avail_mb": mem, "backup_age_s": bage,
-                             "anchors_online": alive, "anchors_total": len(TARGETS),
+                             "anchors_online": alive, "anchors_total": len(TARGETS), "hosts": hosts,
                              "watcher_beat_age_s": int(now - BEAT["last"]) if BEAT["last"] else None})
 
 
@@ -1984,6 +2004,21 @@ def _target_auth(h, body):
     return cfg
 
 
+def _clean_host(d):
+    """Состояние сервера от цели (подпись цели проверена, но хаб ничему не верит вслепую): только известные поля и ограниченные значения."""
+    if not isinstance(d, dict):
+        return None
+    ips = []
+    for x in (d.get("ssh_ips") or [])[:10]:
+        try:
+            ips.append(str(ipaddress.ip_address(str(x))))
+        except ValueError:
+            continue
+    return {"reboot": bool(d.get("reboot")), "reboot_since": max(0, min(int(d.get("reboot_since", 0)), 4102444800)),
+            "sec_updates": max(-1, min(int(d.get("sec_updates", -1)), 10000)), "uptime_s": max(0, min(int(d.get("uptime_s", 0)), 10 ** 9)),
+            "bans_1h": max(0, min(int(d.get("bans_1h", 0)), 100000)), "ssh_ips": ips}
+
+
 def target_poll(h, body):
     cfg = _target_auth(h, body)
     if cfg is None:
@@ -1995,9 +2030,12 @@ def target_poll(h, body):
             return h.err(403, "устаревший запрос")
         acks = {str(x) for x in (req.get("ack") or [])[:400]}
         pad = {int(p): max(100, min(int(n), 1400)) for p, n in list((req.get("pad") or {}).items())[:4]}
+        host = _clean_host(req.get("host"))
     except (ValueError, TypeError, AttributeError):
         return h.err(400, "некорректный запрос")
     code = cfg["code"]
+    if host:
+        HOST[code] = dict(host, seen=int(time.time()))
     TARGET_PAD[code] = pad
     deadline = time.time() + 20
     with HLOCK:

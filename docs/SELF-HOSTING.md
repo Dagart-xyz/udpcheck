@@ -110,8 +110,25 @@ UDPCHECK_TARGET_TCP_PORT=8443
 - `ops/hardening/journald-udpcheck.conf` в `/etc/systemd/journald.conf.d/`: системный журнал не дольше 30 суток (в нём попытки входа по SSH; это единственное место, где остаются адреса, и политика данных об этом говорит);
 - `ops/hardening/sshd-udpcheck.conf` в `/etc/ssh/sshd_config.d/10-udpcheck.conf`: только ключи, без проброса портов, X11 и агента, `LoginGraceTime 30`, `MaxAuthTries 4` (проверьте `sshd -t` и откройте второе подключение, прежде чем закрыть первое);
 - автообновления безопасности: `unattended-upgrades` и `ops/hardening/20auto-upgrades`. На некоторых образах хостеров `apt-daily*.service` замаскированы (`systemctl unmask apt-daily.service apt-daily-upgrade.service`). Ядро и libc применяются только после перезагрузки: смотрите `/var/run/reboot-required` и перезагружайте серверы по одному, проверяя после каждого `nft list tables`, службы и ответ портов снаружи;
+- `ops/hardening/caddy-sandbox.conf` в `/etc/systemd/system/caddy.service.d/sandbox.conf`: Caddy может писать только в `/var/lib/caddy` и `/var/log/caddy` (оценка `systemd-analyze security` 8.8 → 1.6);
+- `ops/udpcheck-hostcheck.py` с `udpcheck-hostcheck.service` и `.timer` (`/usr/local/sbin`, `/etc/systemd/system`) раз в 5 минут пишет `/run/udpcheck-host.json`: нужна ли перезагрузка, есть ли обновления безопасности, баны за час, адреса входов по SSH. Рабочий процесс передаёт это хабу в своём подписанном опросе, наблюдатель сообщает о перезагрузке старше 2 суток, обновлениях безопасности старше 3 суток, волне банов (60 в час) и входе по SSH с нового адреса (первые 24 часа адреса только запоминаются; в своём состоянии наблюдатель хранит их хэши);
 - перед публикацией правок прогоняйте `tests/fuzz_local.py` (мусорные UDP- и HTTP-запросы) и остальные `tests/test_*_local.py`.
 Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.
+
+## Подпись установщика и агента
+
+`build_site.py` подписывает агент и установщик ключом Ed25519 (закрытый ключ `release_ed25519.pem` хранится у владельца проекта вне хаба и вне репозитория, открытый лежит в `installer/release.pub.pem` и вшит в установщик). Установщик проверяет подпись агента, если у системы есть `openssl` с поддержкой Ed25519 (3.0+): нет подписи или она не сходится, установка прерывается. На роутерах и старых системах остаётся только проверка SHA-256, установщик об этом говорит.
+
+Если хаб взломают, злоумышленник сможет подменить и установщик. Поэтому подозрительный установщик проверяйте по ключу из репозитория, а не с хаба:
+
+```
+curl -fsSL https://dagart.xyz/i -o install-node.sh
+curl -fsSL https://dagart.xyz/install-node.sh.sig -o install-node.sh.sig
+curl -fsSL https://raw.githubusercontent.com/Dagart-xyz/udpcheck/main/installer/release.pub.pem -o release.pub.pem
+openssl pkeyutl -verify -pubin -inkey release.pub.pem -rawin -in install-node.sh -sigfile install-node.sh.sig
+```
+
+Свой форк: создайте ключ `openssl genpkey -algorithm ed25519 -out release_ed25519.pem`, положите открытую часть (`openssl pkey -in release_ed25519.pem -pubout`) в `installer/release.pub.pem` и пересоберите сайт.
 
 ## 5. Проверка и сопровождение
 

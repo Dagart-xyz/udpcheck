@@ -1,0 +1,10 @@
+[Unit]
+Description=udpcheck: состояние сервера раз в 5 минут
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

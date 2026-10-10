@@ -1,0 +1,17 @@
+[Unit]
+Description=udpcheck: состояние сервера для наблюдателя (перезагрузка, обновления, баны, входы по SSH)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/udpcheck-hostcheck.py
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes

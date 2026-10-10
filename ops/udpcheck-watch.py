@@ -12,6 +12,7 @@
 Только стандартная библиотека. Если не настроен ни один канал, сообщения печатаются на экран (так же работают тесты).
 """
 import calendar
+import hashlib
 import json
 import os
 import sys
@@ -34,6 +35,10 @@ EXPIRY = [x.strip() for x in os.environ.get("WATCH_EXPIRY", "").split(",") if "=
 EXPIRY_HOUR = int(os.environ.get("EXPIRY_HOUR", "10"))                # во сколько по Москве напоминать
 NAMES_HOUR = int(os.environ.get("NAMES_HOUR", "19"))                  # во сколько по Москве присылать разбор названий провайдеров
 NAMES_EVERY_DAYS = int(os.environ.get("NAMES_EVERY_DAYS", "1"))       # как часто (потом можно поставить 7)
+REBOOT_AFTER_H = int(os.environ.get("WATCH_REBOOT_AFTER_H", "48"))    # сколько часов можно жить с неприменённым обновлением ядра, прежде чем сообщить
+SECUPD_AFTER_H = int(os.environ.get("WATCH_SECUPD_AFTER_H", "72"))    # сколько часов обновления безопасности могут ждать установки
+BANS_SURGE = int(os.environ.get("WATCH_BANS_SURGE", "60"))            # банов fail2ban за час на одном сервере: волна подбора
+SSH_LEARN_H = int(os.environ.get("WATCH_SSH_LEARN_H", "24"))          # первые часы входы по SSH только запоминаем (какие адреса «свои»)
 
 
 def now():
@@ -128,7 +133,7 @@ def flush(st):
 
 
 # ---------------------------------------------------------------- состояние проверок
-def check(st, name, bad, need, down_text, up_text, critical=False):
+def check(st, name, bad, need, down_text, up_text, critical=False, remind=None):
     """bad: сейчас плохо? need: сколько проверок подряд плохо, чтобы сообщить. Сообщаем при переходе, напоминаем раз в REMIND."""
     c = st["checks"].setdefault(name, {"fail": 0, "alerted": False, "last": 0})
     t = now()
@@ -137,13 +142,55 @@ def check(st, name, bad, need, down_text, up_text, critical=False):
         if c["fail"] >= need and not c["alerted"]:
             c["alerted"], c["last"] = True, t
             notify(st, "ПРОБЛЕМА: " + down_text, critical)
-        elif c["alerted"] and t - c["last"] >= REMIND:
+        elif c["alerted"] and t - c["last"] >= (remind or REMIND):
             c["last"] = t
             notify(st, "ВСЁ ЕЩЁ: " + down_text, critical)
     else:
         if c["alerted"]:
             notify(st, "ВОССТАНОВЛЕНО: " + up_text, critical)
         c.update(fail=0, alerted=False)
+
+
+def host_check(st, health, anchors):
+    """Состояние самих серверов (его присылают серверы проекта через хаб): висящая перезагрузка, неустановленные обновления безопасности,
+    волна банов, вход по SSH с нового адреса. Адреса «своих» входов в состоянии хранятся хэшами."""
+    hosts = health.get("hosts") or {}
+    if not hosts:
+        return
+    t = now()
+    names = {a["code"]: a["name"] for a in anchors}
+    known = st.setdefault("known_ssh", {})
+    learning = t < st.setdefault("known_since", t) + SSH_LEARN_H * 3600
+    since = st.setdefault("secupd", {})
+    for code, h in sorted(hosts.items()):
+        name = names.get(code, code)
+        stale = h.get("age_s", 0) > 1800
+        check(st, "host-stale:" + code, stale, 3, "нет свежих данных о состоянии сервера «%s» (служба udpcheck-hostcheck.timer остановилась?)" % name,
+              "данные о состоянии сервера «%s» снова приходят" % name, remind=86400)
+        if stale:
+            continue
+        days = (t - h.get("reboot_since", t)) / 86400
+        check(st, "reboot:" + code, bool(h.get("reboot")) and (t - h.get("reboot_since", t)) > REBOOT_AFTER_H * 3600, 1,
+              "серверу «%s» уже %d дн. нужна перезагрузка (обновлено ядро или системная библиотека). Перезагружайте серверы по одному и после каждого проверяйте сайт." % (name, int(days)),
+              "сервер «%s» перезагружен" % name, remind=86400)
+        sec = h.get("sec_updates", -1)
+        if sec > 0:
+            since.setdefault(code, t)
+        else:
+            since.pop(code, None)
+        check(st, "secupd:" + code, sec > 0 and t - since.get(code, t) > SECUPD_AFTER_H * 3600, 1,
+              "на сервере «%s» уже больше %d ч не ставятся обновления безопасности (ждут %d шт.): проверьте apt-daily-upgrade.timer и unattended-upgrades" % (name, SECUPD_AFTER_H, sec),
+              "обновления безопасности на сервере «%s» установлены" % name, remind=86400)
+        check(st, "bans:" + code, h.get("bans_1h", 0) >= BANS_SURGE, 1,
+              "на сервере «%s» за последний час забанено %d адресов: идёт волна подбора входа по SSH (fail2ban справляется, но смотрите на сервер)" % (name, h.get("bans_1h", 0)),
+              "волна банов на сервере «%s» закончилась" % name, remind=6 * 3600)
+        for ip in h.get("ssh_ips", []):
+            key = hashlib.sha256(ip.encode()).hexdigest()[:12]
+            if key in known:
+                continue
+            known[key] = int(t)
+            if not learning:
+                notify(st, "Вход по SSH на сервер «%s» с нового адреса %s. Если это вы, ничего делать не нужно. Если нет, срочно сообщите: это может быть чужой доступ." % (name, ip))
 
 
 def expiry_check(st):
@@ -247,6 +294,7 @@ def run():
         ba = health.get("backup_age_s")
         if ba is not None:
             check(st, "backup", ba > 36 * 3600, 1, "последняя резервная копия хаба старше 36 часов (%d ч)." % (ba // 3600), "резервная копия снова свежая")
+        host_check(st, health, nodes.get("anchors", []))
         df, ma = health.get("disk_free_pct"), health.get("mem_avail_mb")
         if df is not None:
             check(st, "disk", df < 10, 1, "на хабе мало места на диске (свободно %d%%)." % df, "места на диске хаба снова достаточно")

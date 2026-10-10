@@ -14,4 +14,6 @@ put() {   # put ЛОКАЛЬНЫЙ_ФАЙЛ ИМЯ_НА_СЕРВЕРЕ
 put "$TMP" index.html
 rm -f "$TMP"
 for f in privacy.html terms.html robots.txt; do [ -f "site/$f" ] && put "site/$f" "$f"; done
+# установщик и агент с подписями (их создаёт build_site.py)
+for f in install-node.sh install-node.sh.sig node/udpcheck_node.py node/udpcheck_node.py.sig node/udpcheck_node.py.sha256; do [ -f "site/$f" ] && put "site/$f" "$f"; done
 echo "страница выложена, версия $B"

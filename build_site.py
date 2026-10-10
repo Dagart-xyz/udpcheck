@@ -4,6 +4,7 @@
 Запуск: python build_site.py   (результат в site/, затем выкладывается на сервер)"""
 import hashlib
 import os
+import subprocess
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SITE = os.path.join(ROOT, "site")
@@ -20,8 +21,19 @@ sha = hashlib.sha256(agent).hexdigest()
 open(os.path.join(SITE, "node", "udpcheck_node.py.sha256"), "w", newline="\n").write(sha + "\n")
 
 tpl = lf(open(os.path.join(ROOT, "installer", "install-node.sh.in"), "rb").read()).decode("utf-8")
-assert "@@SHA256@@" in tpl
-open(os.path.join(SITE, "install-node.sh"), "w", encoding="utf-8", newline="\n").write(tpl.replace("@@SHA256@@", sha))
+assert "@@SHA256@@" in tpl and "@@PUBKEY@@" in tpl
+pub = open(os.path.join(ROOT, "installer", "release.pub.pem"), encoding="utf-8").read().strip()
+open(os.path.join(SITE, "install-node.sh"), "w", encoding="utf-8", newline="\n").write(tpl.replace("@@SHA256@@", sha).replace("@@PUBKEY@@", pub))
+
+# Подпись выпуска (Ed25519). Закрытый ключ хранится у владельца проекта вне хаба и вне репозитория: UDPCHECK_RELEASE_KEY или ~/.udpcheck-github/release_ed25519.pem.
+# Без ключа (например, сборка из чужого форка) подписи не создаются: тогда подставьте свой открытый ключ в installer/release.pub.pem.
+KEY = os.environ.get("UDPCHECK_RELEASE_KEY") or os.path.join(os.path.expanduser("~"), ".udpcheck-github", "release_ed25519.pem")
+if os.path.exists(KEY):
+    for f in (os.path.join(SITE, "node", "udpcheck_node.py"), os.path.join(SITE, "install-node.sh")):
+        subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", KEY, "-rawin", "-in", f, "-out", f + ".sig"], check=True)
+    print("подписаны: агент и установщик")
+else:
+    print("ПРЕДУПРЕЖДЕНИЕ: закрытый ключ выпуска не найден, подписи не созданы (установщик на хабе с подписью откажется ставить агент)")
 
 open(os.path.join(SITE, "protocol.txt"), "wb").write(lf(open(os.path.join(ROOT, "PROTOCOL.md"), "rb").read()))
 print("агент sha256:", sha)

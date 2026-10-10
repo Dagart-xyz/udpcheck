@@ -40,6 +40,28 @@ fetch() {
   fi
 }
 
+# Открытый ключ выпуска: агент подписан закрытым ключом, который хранится у владельца проекта и не лежит на хабе (проверка: installer/release.pub.pem в репозитории)
+RELEASE_PUB='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAhNm81cJlzBt8A5K+e6Lhxb47/+Q/WCObOgWJwCpYDYY=
+-----END PUBLIC KEY-----'
+
+# verify_sig ФАЙЛ [КОМАНДА_СКАЧИВАНИЯ]: проверяет подпись агента. Если openssl умеет Ed25519, подпись обязательна (отсутствие подписи на хабе = отказ),
+# иначе (старые системы, роутеры) остаётся только проверка SHA-256, и установщик об этом говорит.
+verify_sig() {
+  if ! command -v openssl >/dev/null 2>&1 || ! openssl pkeyutl -help 2>&1 | grep -q rawin; then
+    say "Подпись агента не проверена (нет openssl с Ed25519): проверена только контрольная сумма."
+    return 0
+  fi
+  VP="$(mktemp)"; VS="$(mktemp)"
+  printf '%s\n' "$RELEASE_PUB" > "$VP"
+  ${2:-fetch} "$HUB/node/udpcheck_node.py.sig" "$VS" 30 || { rm -f "$VP" "$VS"; die "на хабе нет подписи агента. Установка прервана."; }
+  if openssl pkeyutl -verify -pubin -inkey "$VP" -rawin -in "$1" -sigfile "$VS" >/dev/null 2>&1; then
+    rm -f "$VP" "$VS"; say "Подпись агента проверена."
+  else
+    rm -f "$VP" "$VS"; die "подпись агента не совпала с ключом выпуска. Установка прервана."
+  fi
+}
+
 [ "$(uname -s)" = Linux ] || die "установщик работает только на Linux (на macOS и Windows запустите агент вручную: скачайте $HUB/node/udpcheck_node.py и выполните python3 udpcheck_node.py)"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -230,6 +252,7 @@ openwrt_install() {
   pyfetch "$HUB/node/udpcheck_node.py" "$TMP" 60 || die "не удалось скачать агент"
   GOT="$(sha256sum "$TMP" | cut -d' ' -f1)"
   [ "$GOT" = "$AGENT_SHA256" ] || die "контрольная сумма агента не совпала (получено $GOT, ожидалось $AGENT_SHA256). Установка прервана."
+  verify_sig "$TMP" pyfetch
   python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$TMP" || die "скачанный файл не является корректным Python"
   mkdir -p /opt/udpcheck-node /etc/udpcheck-node
   cp "$TMP" /opt/udpcheck-node/udpcheck_node.py
@@ -370,6 +393,7 @@ else
   die "нет sha256sum, проверить контрольную сумму нечем"
 fi
 [ "$GOT" = "$AGENT_SHA256" ] || die "контрольная сумма агента не совпала (получено $GOT, ожидалось $AGENT_SHA256). Установка прервана."
+verify_sig "$TMP"
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$TMP" || die "скачанный файл не является корректным Python"
 
 install -d -m 755 "$DIR"

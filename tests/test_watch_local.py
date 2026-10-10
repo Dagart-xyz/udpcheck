@@ -33,7 +33,11 @@ BEAT = "b" * 32
 env = dict(os.environ, UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX",
            UDPCHECK_HTTP_PORT="18080", UDPCHECK_UDP_BIND="127.0.0.1", UDPCHECK_UDP_PORTS="19993,19777,19321", UDPCHECK_TARGET_ID="RU-T",
            UDPCHECK_TARGET_SECRET=secA, UDPCHECK_HUB_URL=HUB, UDPCHECK_TARGET_TCP_PORT="18443", UDPCHECK_HUB_DB=os.path.join(tmp, "hub.db"),
-           UDPCHECK_HUB_TARGETS=tfile, UDPCHECK_BEAT_SECRET=BEAT, UDPCHECK_BACKUP_MARK=os.path.join(tmp, "last_backup"))
+           UDPCHECK_HUB_TARGETS=tfile, UDPCHECK_BEAT_SECRET=BEAT, UDPCHECK_BACKUP_MARK=os.path.join(tmp, "last_backup"),
+           UDPCHECK_HOST_FILE=os.path.join(tmp, "host.json"))
+# состояние сервера, которое на настоящих серверах пишет ops/udpcheck-hostcheck.py: висит перезагрузка 3 суток, 2 обновления безопасности, волна банов, вход с нового адреса
+json.dump({"ts": int(time.time()), "reboot": True, "reboot_since": int(time.time()) - 3 * 86400, "sec_updates": 2, "uptime_s": 5000, "bans_1h": 100, "ssh_ips": ["203.0.113.5"]},
+          open(os.path.join(tmp, "host.json"), "w"))
 open(os.path.join(tmp, "last_backup"), "w").write(str(int(time.time()) - 3600))
 
 
@@ -79,8 +83,22 @@ try:
         check("сигнал жизни с неверным секретом отклонён", False)
     except urllib.error.HTTPError as e:
         check("сигнал жизни с неверным секретом отклонён", e.code == 403)
+    hs = h.get("hosts", {}).get("RU-T", {})
+    check("хаб принял состояние сервера от самой цели (подписанный опрос)", hs.get("reboot") is True and hs.get("bans_1h") == 100 and hs.get("ssh_ips") == ["203.0.113.5"], h.get("hosts"))
+    check("без секрета состояние серверов не отдаётся", "hosts" not in ha, ha)
+    sfile = os.path.join(tmp, "state_host.json")
+    out = watch(WATCH_STATE=sfile, WATCH_SSH_LEARN_H="0", WATCH_SECUPD_AFTER_H="-1")
+    check("наблюдатель: висящая перезагрузка (3 суток)", "нужна перезагрузка" in out and "ru test" in out, out)
+    check("наблюдатель: неустановленные обновления безопасности", "обновления безопасности" in out, out)
+    check("наблюдатель: волна банов", "забанено 100" in out, out)
+    check("наблюдатель: вход по SSH с нового адреса", "нового адреса 203.0.113.5" in out, out)
+    out = watch(WATCH_STATE=sfile, WATCH_SSH_LEARN_H="0", WATCH_SECUPD_AFTER_H="-1")
+    check("повторно те же состояния не дублируются", "нужна перезагрузка" not in out and "нового адреса" not in out and "забанено" not in out, out)
+    sfile2 = os.path.join(tmp, "state_learn.json")
+    out = watch(WATCH_STATE=sfile2, WATCH_SSH_LEARN_H="24")
+    check("в первые часы входы по SSH только запоминаются (без тревоги)", "нового адреса" not in out, out)
     out = watch()
-    check("наблюдатель: сервер F-T не опрашивает хаб, но пока меньше 5 минут: тишина", out == "", out)
+    check("наблюдатель: сервер F-T не опрашивает хаб, но пока меньше 5 минут: про него тишина", "foreign test" not in out, out)
     for _ in range(4):
         out = watch()
     check("на пятой минуте подряд: ПРОБЛЕМА по серверу проекта F-T", "ПРОБЛЕМА" in out and "foreign test" in out and "ru test" not in out, out)
