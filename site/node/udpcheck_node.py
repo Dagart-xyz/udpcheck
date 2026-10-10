@@ -541,7 +541,7 @@ def show(resp):
     if resp.get("src_same") in ("different", "mixed"):
         say("ВНИМАНИЕ: UDP вышел с другого адреса, чем HTTPS (VPN или обход на роутере). Результат искажён.")
     if resp["verdict"]["code"] == "TUNNEL":
-        say("Выключите прокси/VPN/туннель (Throne, v2rayN, Passwall и т. п.) или исключите адреса целей из него и повторите.")
+        say("Выключите прокси, VPN или туннель либо исключите из него адреса целей и повторите.")
     say(resp.get("attribution", ""))
 
 

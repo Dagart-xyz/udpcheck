@@ -246,7 +246,7 @@ button.btn.ghost{border:1px solid var(--line)}
         <div class="cmdrow"><div class="t">Принудительно роль «опорный сервер» (только отвечает на проверки)</div><pre class="cmd" id="c5">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | UDPCHECK_ROLE=ref sh</pre><button class="copy" data-for="c5" type="button">Скопировать</button></div>
         <div class="cmdrow"><div class="t">Удалить (служба, файлы, токен)</div><pre class="cmd" id="c3">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh -s -- uninstall</pre><button class="copy" data-for="c3" type="button">Скопировать</button></div>
         <div class="cmdrow"><div class="t">Windows (PowerShell, нужен Python 3.7+). На macOS то же через curl и python3</div><pre class="cmd" id="c2">iwr https://dagart.xyz/node/udpcheck_node.py -OutFile udpcheck_node.py; python udpcheck_node.py</pre><button class="copy" data-for="c2" type="button">Скопировать</button></div>
-        <p class="small muted" style="margin-bottom:0">Если работает прокси или VPN (Throne, v2rayN, Passwall и т. п.), узел это заметит, и такой замер не учтётся.</p>
+        <p class="small muted" style="margin-bottom:0">Если на пути работает прокси, VPN или туннель, узел это заметит, и такой замер не учтётся.</p>
       </details>
     </div>
   </section>
@@ -280,7 +280,7 @@ button.btn.ghost{border:1px solid var(--line)}
   </section>
 
   <footer>
-    <div id="attr">IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (CC BY 4.0). Названия городов: <a href="https://www.geonames.org">GeoNames</a> (CC BY 4.0)</div>
+    <div id="attr">IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). Названия городов: <a href="https://www.geonames.org">GeoNames</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). Названия и типы сетей: <a href="https://stat.ripe.net">RIPEstat</a> (RIPE NCC) и <a href="https://www.peeringdb.com">PeeringDB</a>.</div>
     <div><a href="/privacy">Политика данных</a> · <a href="/terms">Условия</a> · <a href="/protocol.txt">Протокол узлов</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Исходный код (AGPL-3.0)</a> · Связь: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a></div>
   </footer>
 </div>
@@ -994,6 +994,8 @@ function showProvider(asn){
     var wb = d.web || {}, wn = 0, wc = 0, kk; for (kk in wb) { wn += wb[kk]; if (kk !== "NO_BLOCK") wc += wb[kk]; }
     if (wn) c5.appendChild(el("div", "small muted", "Проверок из браузера посетителей за сутки: " + wn + ", из них с блокировкой: " + wc + "."));
     box.appendChild(c5);
+    var dis = el("div", "small muted", "Это автоматические измерения: они показывают, проходит ли UDP между сетью и серверами проекта в момент замера. Причина потерь может быть не у провайдера (транзитные сети, оборудование и настройки пользователей). Подробнее в условиях использования. Нашли ошибку или хотите уточнить данные: draldrean@protonmail.com.");
+    dis.style.marginTop = "14px"; var dl = el("a", null, " Условия использования"); dl.href = "/terms"; dis.appendChild(dl); box.appendChild(dis);
     var cta = el("a", "btn", "Вы в этой сети? Проверить своё подключение"); cta.href = "/"; cta.style.marginTop = "16px"; box.appendChild(cta);
   }).catch(function(){ box.appendChild(el("div", "err", "Нет связи с сервером.")); });
 }

@@ -20,7 +20,7 @@ set -eu
 HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
 ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (проверяет свою сеть) | ref (опорный сервер) | both
 if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # старая переменная: REF=0 означало «только узел»
-AGENT_SHA256="7728beca56349be05b185d385c9f825d96c2f7e00a6495eed6fa3e461cab0e70"
+AGENT_SHA256="0924a171253cc4fdf15f7a4bc23faedb04ff20a5fad75494b5a5ad46b988f07e"
 DIR=/opt/udpcheck-node
 STATE=/var/lib/udpcheck-node
 SVC=udpcheck-node
