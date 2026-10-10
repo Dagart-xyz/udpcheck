@@ -1,14 +1,15 @@
 [Unit]
-Description=udpcheck: замедлитель роботов (ответы без признаков браузера идут с задержкой, не блокируются)
+Description=udpcheck: замедлитель роботов (ответы без признаков браузера идут с задержкой, не блокируются; запросы-атаки получают 404 и учёт для fail2ban)
 After=network.target caddy.service
 
 [Service]
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/udpcheck/udpcheck-tarpit.py
 Restart=always
 RestartSec=3
 DynamicUser=yes
 MemoryMax=96M
-TasksMax=16
+TasksMax=24
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

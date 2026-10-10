@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# fail2ban для сайта: адрес, трижды за 10 минут запросивший то, что похоже на атаку (wp-login, .env, SQL-инъекция и т. п.), блокируется на 80/443 (TCP) на сутки;
+# при повторах срок растёт (2, 4, 8 ... суток, потолок 4 недели; настройки нарастания берутся из fail2ban-udpcheck.local). SSH и порты проверки UDP не затрагиваются.
+# Положить в /etc/fail2ban/jail.d/udpcheck-probe.local вместе с filter.d/udpcheck-probe.conf и udpcheck-goodbot.sh (chmod 755), затем fail2ban-client reload.
+# В ignoreip на каждом хабе добавьте свои адреса: опорные серверы сети, откуда идут опросы хаба, и администратора.
+[udpcheck-probe]
+enabled = true
+filter = udpcheck-probe
+backend = systemd
+journalmatch = _SYSTEMD_UNIT=udpcheck-tarpit.service
+port = http,https
+maxretry = 3
+findtime = 10m
+bantime = 1d
+ignorecommand = /etc/fail2ban/udpcheck-goodbot.sh <ip>
+ignorecache = key="<ip>", max-count=500, max-time=1h
+ignoreip = 127.0.0.1/8 ::1

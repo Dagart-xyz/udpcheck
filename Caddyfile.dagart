@@ -70,6 +70,16 @@ dagart.xyz {
 	@noindex path /api/* /udpcheck/* /install-node.sh /install-node.en.sh /i /en/i /node/* /protocol.txt
 	header @noindex X-Robots-Tag "noindex, nofollow"
 
+	# Запросы, похожие на атаку (поиск служебных файлов, SQL-инъекции, WordPress, phpMyAdmin, GraphQL, обход каталогов и т. п.; нашему сайту всё это не нужно) и
+	# известные сканеры по User-Agent. Идут к замедлителю: он ждёт 8-20 с, отвечает 404 и пишет в журнал строку PROBE; повторивших банит fail2ban (джейл udpcheck-probe).
+	# Настоящих посетителей это не задевает: такие адреса они не запрашивают. В регулярных выражениях без обратной косой черты: точка в [.], скобка в [(].
+	@probe expression `{http.request.uri}.matches('(?i)(union([ +]|%20)+(all([ +]|%20)+)?select|sleep([(]|%28)|benchmark([(]|%28)|waitfor([ +]|%20)+delay|dbms_pipe|/etc/passwd|[.][.]/[.][.]/|%2e%2e(/|%2f)|/[.]env|/[.]git/|/[.]svn/|/[.]aws/|/[.]ds_store|wp-login|wp-admin|wp-content|wp-includes|xmlrpc[.]php|phpmyadmin|/pma/|/adminer|/graphi?ql|/actuator|/cgi-bin/|/vendor/phpunit|/boaform|/hnap1|/server-status|/shell[.]php|eval-stdin|jndi:|%3cscript|<script)') || {http.request.header.User-Agent}.matches('(?i)(sqlmap|nikto|masscan|zgrab|nuclei|dirbuster|gobuster|wpscan|acunetix|netsparker|havij|w3af|nessus|openvas)')`
+	handle @probe {
+		reverse_proxy 127.0.0.1:18081 {
+			header_up X-Probe 1
+		}
+	}
+
 	# Хаб: API проекта (старый префикс /udpcheck оставлен для уже установленных узлов и целей)
 	handle /udpcheck/* {
 		import hub
@@ -80,6 +90,18 @@ dagart.xyz {
 
 	# Роботы без признаков браузера (нет Accept-Language и Sec-Fetch-Mode, не поисковик и не превью ссылки, не служебный адрес) получают ту же страницу, но
 	# не сразу: их ведёт udpcheck-tarpit (ops/udpcheck-tarpit.py), который берёт страницу у внутреннего адреса ниже. Не блокировка: страница приходит, с задержкой.
+	# Называющие себя поисковиками (Google, Bing, Яндекс, Apple) проверяются по обратному DNS в замедлителе: настоящие проходят сразу, подделки идут медленным путём.
+	# Заголовок X-Probe убираем у всех, кроме правила выше: его ставит только Caddy.
+	@claimedbot {
+		header_regexp ua User-Agent (?i)(googlebot|adsbot-google|googleother|google-inspectiontool|bingbot|msnbot|bingpreview|yandex[.]com/bots|applebot)
+		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/*
+	}
+	handle @claimedbot {
+		reverse_proxy 127.0.0.1:18081 {
+			header_up -X-Probe
+			header_up X-Claimed-Bot 1
+		}
+	}
 	@robotish {
 		not header Accept-Language *
 		not header Sec-Fetch-Mode *
@@ -105,7 +127,10 @@ dagart.xyz {
 		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/*
 	}
 	handle @robotish {
-		reverse_proxy 127.0.0.1:18081
+		reverse_proxy 127.0.0.1:18081 {
+			header_up -X-Probe
+			header_up -X-Claimed-Bot
+		}
 	}
 
 	# Проект: лендинг и кнопка проверки в корне сайта

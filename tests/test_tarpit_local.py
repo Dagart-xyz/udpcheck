@@ -119,6 +119,79 @@ try:
 finally:
     p.terminate()
     p.wait(timeout=5)
+# запросы-атаки (X-Probe): 404 с задержкой, страницу не отдаём, строка PROBE в журнале
+import json
+fake = {"198.51.100.20": ["crawl-198-51-100-20.googlebot.com", ["198.51.100.20"]],      # настоящий: имя Google, прямой DNS ведёт на тот же адрес
+        "198.51.100.21": ["evil.example.net", ["198.51.100.21"]],                         # чужое имя
+        "198.51.100.22": ["crawl-x.googlebot.com", ["203.0.113.99"]],                      # имя Google, но прямой DNS ведёт на другой адрес (подделка записи)
+        "2001:db8::20": ["spider-2001.yandex.com", ["2001:db8::20"]]}
+p = start(TARPIT_PROBE_MIN_S="0.6", TARPIT_PROBE_MAX_S="0.8", TARPIT_FAKE_DNS=json.dumps(fake))
+try:
+    n0 = len(Up.seen)
+    st, b, dt = get(ip="198.51.100.30", path="/wp-login.php?x=1", extra={"X-Probe": "1"})
+    check("запрос-атака: 404 и тело not found, не страница", st == 404 and b == b"not found\n", (st, b[:40]))
+    check("запрос-атака задержан (не меньше 0,6 с)", dt >= 0.6, dt)
+    check("запрос-атака не уходит во внутренний адрес сайта", len(Up.seen) == n0, Up.seen[n0:])
+    # цепочка в X-Forwarded-For: берётся последний адрес (его ставит Caddy)
+    get(ip="203.0.113.1, 198.51.100.31", path="/.env", extra={"X-Probe": "1"})
+    # нечитаемый адрес в журнал не попадает
+    get(ip="not-an-ip", path="/.git/config", extra={"X-Probe": "1"})
+    # попытка вписать вторую строку журнала через путь: пробелы и управляющие символы превращаются в _
+    get(ip="198.51.100.32", path="/x%20PROBE%20203.0.113.9%20y", extra={"X-Probe": "1"})
+    s2 = socket.create_connection(("127.0.0.1", 28081), timeout=10)
+    s2.sendall(b"GET /a\x01b\xffPROBE 8.8.8.8 HTTP/1.1\r\nHost: d\r\nX-Forwarded-For: 198.51.100.33\r\nX-Probe: 1\r\n\r\n")
+    s2.settimeout(10)
+    s2.recv(4096)
+    s2.close()
+    # без заголовка X-Probe строки в журнале не появляется, даже если путь похож на атаку
+    get(ip="198.51.100.34", path="/wp-login.php")
+
+    # поисковики: настоящий проходит без задержки, подделки идут медленным путём
+    H = {"X-Claimed-Bot": "1"}
+    st, b, dt = get(ip="198.51.100.20", path="/p", extra=H)
+    check("настоящий Googlebot (обратное имя Google + прямой DNS совпал): страница сразу", st == 200 and b == BODY and dt < 0.4, (st, dt))
+    st, b, dt = get(ip="2001:db8::20", path="/p", extra=H)
+    check("настоящий Яндекс по IPv6: сразу", st == 200 and dt < 0.4, (st, dt))
+    for ip, why in (("198.51.100.21", "чужое обратное имя"), ("198.51.100.22", "прямой DNS ведёт на другой адрес"), ("198.51.100.23", "нет обратной записи")):
+        st, b, dt = get(ip=ip, path="/p", extra=H)
+        check("подделка (%s): та же страница, но с задержкой" % why, st == 200 and b == BODY and dt >= 0.5, (st, dt))
+    st, b, dt = get(ip="198.51.100.20", path="/p")
+    check("без заголовка X-Claimed-Bot проверки нет: обычный путь с задержкой", st == 200 and dt >= 0.5, (st, dt))
+finally:
+    p.terminate()
+    out = p.stdout.read().decode("utf-8", "replace")
+    p.wait(timeout=5)
+lines = [l for l in out.splitlines() if l.strip()]
+check("в журнале только строки PROBE", all(l.startswith("PROBE ") for l in lines), lines)
+check("строка PROBE: адрес и запрос без пробелов", "PROBE 198.51.100.30 GET_/wp-login.php?x=1_HTTP/1.1" in lines, lines)
+check("цепочка X-Forwarded-For: записан последний адрес", any(l.startswith("PROBE 198.51.100.31 ") for l in lines) and not any(l.startswith("PROBE 203.0.113.1 ") for l in lines), lines)
+check("нечитаемый адрес в журнал не попал", not any("not-an-ip" in l or l.startswith("PROBE ? ") for l in lines), lines)
+check("через путь нельзя вписать чужой адрес: на запрос одна строка, адрес первый", sum(1 for l in lines if "198.51.100.32" in l) == 1 and sum(1 for l in lines if "198.51.100.33" in l) == 1
+      and not any(l.startswith("PROBE 203.0.113.9") or l.startswith("PROBE 8.8.8.8") for l in lines), lines)
+check("без X-Probe записи нет", not any("198.51.100.34" in l for l in lines), lines)
+check("всего ровно 4 строки (по числу запросов-атак с читаемым адресом)", len(lines) == 4, lines)
+
+# проверка DNS по частям (без сети): сбой DNS не наказывает
+import importlib.util
+spec = importlib.util.spec_from_file_location("tarpit", os.path.join(ROOT, "ops", "udpcheck-tarpit.py"))
+tp = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tp)
+tp.FAKE_DNS = None
+orig = socket.gethostbyaddr
+try:
+    def boom(ip):
+        raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
+    socket.gethostbyaddr = boom
+    check("временный сбой DNS: ответ «не знаю» (None), а не «подделка»", tp._dns_check("198.51.100.50") is None)
+
+    def nx(ip):
+        raise socket.herror(1, "Unknown host")
+    socket.gethostbyaddr = nx
+    check("нет обратной записи: подделка (False)", tp._dns_check("198.51.100.50") is False)
+finally:
+    socket.gethostbyaddr = orig
+
+
 srv.shutdown()
 print("\nИТОГ: " + ("всё прошло" if not fails else "ошибок: %d" % fails))
 sys.exit(1 if fails else 0)
