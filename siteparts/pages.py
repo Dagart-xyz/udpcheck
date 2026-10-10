@@ -16,6 +16,23 @@ import strings as ST
 
 ORIGIN = os.environ.get("UDPCHECK_ORIGIN", "https://dagart.xyz")
 
+# Языки сайта: (код, название на самом языке, префикс адреса). Для нового языка добавьте строку, словарь в strings.py и страницу в build();
+# выпадающий список в шапке и ссылки в нём строятся отсюда. Название пишется на своём языке всегда, его не переводят.
+LANGS = [("ru", "Русский", ""), ("en", "English", "/en")]
+GLOBE = ('<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M1.7 8h12.6M8 1.7c1.8 1.8 2.7 3.9 2.7 6.3S9.8 12.5 8 14.3C6.2 12.5 5.3 10.4 5.3 8S6.2 3.5 8 1.7z"/></svg>')
+CHEVRON = '<svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>'
+
+
+def lang_menu(lang, title):
+    items = []
+    for code, name, pfx in LANGS:
+        if code == lang:
+            items.append('<li><span class="cur" aria-current="true" lang="%s">%s</span></li>' % (code, name))
+        else:
+            items.append('<li><a href="%s/" data-lang="%s" data-pfx="%s" hreflang="%s" lang="%s">%s</a></li>' % (pfx, code, pfx, code, code, name))
+    return ('<div class="langmenu" id="langmenu"><button type="button" id="langbtn" aria-haspopup="true" aria-expanded="false" aria-controls="langlist" title="%s">%s<span>%s</span>%s</button>'
+            '<ul id="langlist" hidden>%s</ul></div>' % (title, GLOBE, lang.upper(), CHEVRON, "".join(items)))
+
 
 def render_index(lang):
     tpl = open(os.path.join(HERE, "index.tpl.html"), encoding="utf-8").read()
@@ -26,6 +43,7 @@ def render_index(lang):
     for k, v in (("@@I18N@@", jsd), ("@@LANG@@", lang), ("@@LP@@", "" if ru else "/en"), ("@@ALTHOME@@", "/en/" if ru else "/"),
                  ("@@ALTLANG@@", "en" if ru else "ru"), ("@@ORIGIN@@", ORIGIN), ("@@OGLOCALE@@", "ru_RU" if ru else "en_US")):
         out = out.replace(k, v)
+    out = out.replace("@@LANGMENU@@", lang_menu(lang, html["langsw_title"]))
     assert "@@" not in out and not re.search(r"@\{\w+\}", out), "в странице остались неподставленные метки"
     return out
 

@@ -56,7 +56,7 @@ SNAP_JS = """() => {
           aria: [...document.querySelectorAll('[aria-label]')].map(function(e){ return e.getAttribute('aria-label'); }),
           hrefs: [...document.querySelectorAll('a[href]')].map(function(a){ return a.getAttribute('href'); }),
           desc: (document.querySelector('meta[name=description]') || {}).content || '',
-          langsw: document.getElementById('langsw') ? document.getElementById('langsw').getAttribute('href') : '',
+          langsw: document.querySelector('#langlist a[data-lang]') ? document.querySelector('#langlist a[data-lang]').getAttribute('href') : '',
           hint: !document.getElementById('langhint').hidden,
           canon: (document.querySelector('link[rel=canonical]') || {}).href || '',
           alts: [...document.querySelectorAll('link[rel=alternate]')].map(function(l){ return l.hreflang + '=' + l.getAttribute('href'); }),
@@ -119,7 +119,7 @@ SCENARIOS = [
     S("chk_report429", me="none", stun="ok", trace="ok", report=429, actions=[GO, SNAP]),
     S("chk_twice", me="none", stun="ok", trace="ok", actions=[GO, GO, SNAP]),
     S("lang_hint_other_browser", locale="other", actions=[SNAP, ("click", "#langhintClose"), SNAP, ("reload",), SNAP], skip_cyr=True),
-    S("lang_switch_click", locale="other", path="/as12389", actions=[("click", "#langsw"), ("wait", 600), SNAP], skip_cyr=True),
+    S("lang_switch_click", locale="other", path="/as12389", actions=[("click", "#langbtn"), ("click", "#langlist a[data-lang]"), ("wait", 600), SNAP], skip_cyr=True),
 ]
 
 
@@ -359,7 +359,7 @@ def main():
             for k in ("langsw", "hint", "canon", "alts"):         # поля, которых нет в эталоне
                 d.pop(k, None)
             d["text"] =chr(10).join(l for l in d["text"].split(chr(10)) if l not in ("EN", "RU"))
-            d["titles"] = [x for x in d["titles"] if x not in ("English version", "Русская версия")]
+            d["titles"] = [x for x in d["titles"] if x not in ("English version", "Русская версия", "Язык (Language)", "Language")]
             d["aria"] = [x for x in d["aria"] if x not in ("Close", "Закрыть")]
             d["hrefs"] = [h for h in d["hrefs"] if not (h == "/en/" or h.startswith("/en/") or h == "/en")]
             return d
@@ -400,7 +400,7 @@ def main():
                             bad.append((key, line[:140]))
                 for key in ("placeholders", "titles", "aria"):
                     for line in snap[key]:
-                        if cyr.search(line) and line not in ("Русская версия", "Закрыть"):      # переключатель на русский язык и подсказка о языке: по-русски намеренно
+                        if cyr.search(line) and line not in ("Русская версия", "Закрыть", "Язык (Language)"):      # переключатель на русский язык и подсказка о языке: по-русски намеренно
                             bad.append((key, line[:140]))
                 bad_h = [h for h in snap["hrefs"] if h.startswith("/") and not h.startswith(("/en", "/api", "/#", "/logos", "/protocol", "/install", "/i")) and h != "/"]
                 plain_as = [h for h in bad_h if re.fullmatch(r"/as\d+", h)]

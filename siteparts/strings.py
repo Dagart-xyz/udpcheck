@@ -12,7 +12,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 RU_HTML = json.load(open(os.path.join(HERE, "ru_html.json"), encoding="utf-8"))
 RU_HTML.update({
-    "langsw_title": "English version", "langsw_label": "EN",
+    "langsw_title": "Язык (Language)", "langsw_label": "RU",
     "langhint_text": "This site is also available in English.", "langhint_link": "English", "langhint_close": "Close",
 })
 
@@ -70,7 +70,7 @@ EN_HTML = {
     "footer_links": '<a href="@@LP@@/privacy">Privacy policy</a> · <a href="@@LP@@/terms">Terms</a> · <a href="/protocol.txt">Node protocol</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Source code (AGPL-3.0)</a> · Contact: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a>',
     "notice_text": 'We use no cookies and no counters; the only thing stored in your browser is a random number for rate limits. <a href="@@LP@@/privacy">More</a>',
     "notice_btn": "Got it", "newver_text": "A new version of the site is available.", "newver_btn": "Refresh",
-    "langsw_title": "Русская версия", "langsw_label": "RU",
+    "langsw_title": "Language", "langsw_label": "EN",
     "langhint_text": "Этот сайт также доступен на русском.", "langhint_link": "Русский", "langhint_close": "Закрыть",
 }
 

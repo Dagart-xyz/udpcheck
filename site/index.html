@@ -105,7 +105,20 @@ details[open] summary{margin-bottom:12px}
 #langhint{background:var(--surface2);border-bottom:1px solid var(--line);padding:6px 12px;font-size:13px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
 #langhint[hidden]{display:none}
 #langhint button{border:0;background:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
-nav a#langsw{border:1px solid var(--line);border-radius:6px;padding:0 6px;font-weight:600;font-size:12px;line-height:20px}
+/* выбор языка: кнопка с текущим языком и выпадающий список (список языков задаётся в siteparts/pages.py, для нового языка достаточно добавить строку) */
+.langmenu{position:relative;display:inline-block}
+#langbtn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:8px;padding:3px 8px;font:inherit;font-size:13px;font-weight:600;line-height:20px;cursor:pointer}
+#langbtn:hover,#langbtn[aria-expanded="true"]{border-color:var(--accent)}
+#langbtn svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#langbtn .chev{width:10px;height:10px;transition:transform .15s}
+#langbtn[aria-expanded="true"] .chev{transform:rotate(180deg)}
+#langlist{position:absolute;right:0;top:calc(100% + 6px);z-index:30;margin:0;padding:4px;list-style:none;min-width:150px;max-height:60vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16)}
+#langlist[hidden]{display:none}
+#langlist a,#langlist .cur{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 10px;border-radius:6px;font-size:14px;white-space:nowrap;text-decoration:none}
+#langlist a{color:var(--text)}
+#langlist a:hover,#langlist a:focus-visible{background:var(--surface2)}
+#langlist .cur{font-weight:700;color:var(--accent)}
+#langlist .cur::after{content:"\2713"}
 #notice{position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--surface);border-top:1px solid var(--line);padding:8px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:12.5px;line-height:1.35;color:var(--muted)}
 #notice[hidden]{display:none}
 #notice:not([hidden]) ~ #newver{bottom:64px}
@@ -180,7 +193,7 @@ button.btn.ghost{border:1px solid var(--line)}
 <div class="wrap">
   <header>
     <a class="logo" href="/" id="logo" style="text-decoration:none;color:inherit">UDP<span>check</span></a>
-    <nav><a href="/#providers">Провайдеры</a><a href="/#journal">Журнал</a><a href="/#how">Кто есть кто</a><a href="/#nodes">Узлы</a><a href="/#node">Свой узел</a><a id="langsw" href="/en/" hreflang="en" lang="en" title="English version">EN</a></nav>
+    <nav><a href="/#providers">Провайдеры</a><a href="/#journal">Журнал</a><a href="/#how">Кто есть кто</a><a href="/#nodes">Узлы</a><a href="/#node">Свой узел</a><div class="langmenu" id="langmenu"><button type="button" id="langbtn" aria-haspopup="true" aria-expanded="false" aria-controls="langlist" title="Язык (Language)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M1.7 8h12.6M8 1.7c1.8 1.8 2.7 3.9 2.7 6.3S9.8 12.5 8 14.3C6.2 12.5 5.3 10.4 5.3 8S6.2 3.5 8 1.7z"/></svg><span>RU</span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg></button><ul id="langlist" hidden><li><span class="cur" aria-current="true" lang="ru">Русский</span></li><li><a href="/en/" data-lang="en" data-pfx="/en" hreflang="en" lang="en">English</a></li></ul></div></nav>
   </header>
 
   <div class="hero">
@@ -1023,7 +1036,8 @@ function route(){
   if (m) { showProvider(m[1]); window.scrollTo(0, 0); }
   else document.title = TITLE0;
   var alt = ALT + (m ? "/as" + m[1] : "/");
-  $("langsw").href = alt; $("langhintLink").href = alt;
+  $("langhintLink").href = alt;
+  [].forEach.call(document.querySelectorAll("#langlist a[data-pfx]"), function(a){ a.href = a.getAttribute("data-pfx") + (m ? "/as" + m[1] : "/"); });
   // адрес страницы и языковые версии для поисковиков (страница провайдера и главная отдаются одним файлом, поэтому ссылки ставим здесь)
   var here = LP + (m ? "/as" + m[1] : "/"), ruU = (LANG === "ru" ? here : alt), enU = (LANG === "en" ? here : alt);
   seoLink("canonical", null, location.origin + here);
@@ -1064,7 +1078,19 @@ window.addEventListener("popstate", route);
   try { pref = localStorage.getItem("udpc_lang") || ""; } catch(e){}
   var bl = String((navigator.languages && navigator.languages[0]) || navigator.language || "").slice(0, 2).toLowerCase();
   if (!pref && bl && ((LANG === "ru" && bl !== "ru") || (LANG === "en" && bl === "ru"))) $("langhint").hidden = false;
-  $("langsw").addEventListener("click", function(){ save(ALTLANG); });
+  // выпадающий список языков: открывается кнопкой, закрывается щелчком мимо и Escape; выбор запоминается
+  var btn = $("langbtn"), list = $("langlist");
+  function openMenu(on){
+    list.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false");
+    if (!on) return;
+    list.style.left = ""; list.style.right = "0";
+    var r = list.getBoundingClientRect();
+    if (r.left < 8) { list.style.right = "auto"; list.style.left = "0"; }
+  }
+  btn.addEventListener("click", function(e){ e.stopPropagation(); openMenu(list.hidden); });
+  document.addEventListener("click", function(e){ if (!list.hidden && !$("langmenu").contains(e.target)) openMenu(false); });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape" && !list.hidden) { openMenu(false); btn.focus(); } });
+  [].forEach.call(list.querySelectorAll("a[data-lang]"), function(a){ a.addEventListener("click", function(){ save(a.getAttribute("data-lang")); }); });
   $("langhintLink").addEventListener("click", function(){ save(ALTLANG); });
   $("langhintClose").addEventListener("click", function(){ $("langhint").hidden = true; save(LANG); });
 })();
