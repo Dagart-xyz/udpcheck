@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy policy | UDPcheck</title>
+<meta name="description" content="What data UDPcheck processes, why and for how long.">
+<link rel="canonical" href="https://dagart.xyz/en/privacy">
+<link rel="alternate" hreflang="ru" href="https://dagart.xyz/privacy">
+<link rel="alternate" hreflang="en" href="https://dagart.xyz/en/privacy">
+<link rel="alternate" hreflang="x-default" href="https://dagart.xyz/privacy">
+<style>
+:root{--bg:#f4f6fa;--surface:#fff;--text:#111827;--muted:#5b6578;--line:#d9dfeb;--accent:#0b5fff}
+@media (prefers-color-scheme: dark){:root{--bg:#0c1118;--surface:#151c27;--text:#e8edf5;--muted:#9aa6b8;--line:#273244;--accent:#4d8bff}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 56px}
+a{color:var(--accent)}
+h1{font-size:26px;margin:8px 0 4px}h2{font-size:18px;margin:28px 0 8px}
+.muted{color:var(--muted);font-size:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 18px 16px}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{border-top:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+th{font-size:13px;color:var(--muted);font-weight:600;border-top:0}
+li{margin:4px 0}
+.top{display:flex;justify-content:space-between;align-items:center}
+.top a{text-decoration:none;font-weight:700}
+.top .lang a{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;line-height:20px}
+</style>
+</head>
+<body>
+<main>
+<div class="top"><a href="/en/">← UDPcheck</a><span class="lang"><a href="/privacy" hreflang="ru" lang="ru" title="Русская версия">RU</a></span></div>
+<h1>Privacy policy</h1>
+<div class="muted">Revision of 10 October 2026. Site dagart.xyz, source code: <a href="https://github.com/Dagart-xyz/udpcheck">github.com/Dagart-xyz/udpcheck</a> (AGPL-3.0).</div>
+
+<h2>1. Who we are</h2>
+<div class="card"><p>The service operator is the owner of the UDPcheck project (“we”). Contact for any questions about data:
+<a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a>. The service is non-commercial and has no advertising or analytics.</p></div>
+
+<h2>2. What the service does and why it needs data</h2>
+<div class="card"><p>The service checks whether UDP traffic passes between your device and our servers in your country and abroad, and shows which
+provider blocks traffic and in which direction. For the check to work, the servers must know which address you contact them from: otherwise they have nothing to reply to and
+cannot build a route to you. We collect nothing beyond what is needed for that.</p></div>
+
+<h2>3. What data and for how long</h2>
+<div class="card">
+<table>
+<tr><th>What</th><th>Why</th><th>Where and how long</th></tr>
+<tr><td><b>IP address</b></td><td>to identify the network (provider), reply to test packets, build a route, limit the request rate</td>
+<td>only in the server's memory, for minutes. <b>It is not written to the database or to logs.</b> The web server keeps no access logs</td></tr>
+<tr><td><b>Check result</b>: network number (ASN), provider name, country, how many replies came from which servers, time</td>
+<td>statistics per provider, provider pages, the change journal</td><td>in the database, 60 days</td></tr>
+<tr><td><b>Random browser number</b></td><td>rate limits, so that one browser is not counted in the statistics more than once an hour</td>
+<td>created by the page and stored in your browser (localStorage, key <code>udpc_cid</code>); the database holds only its hash (SHA-256, 16 characters), for 60 days. It is not linked to you and does not collect device data</td></tr>
+<tr><td><b>Intermediate route hops</b></td><td>to show you the route and the places where it breaks</td><td>hop addresses only in memory and in your page; the database gets only the numbers of the networks along the path</td></tr>
+<tr><td><b>Data in your browser</b></td><td>to show the last route without asking again</td><td>localStorage (<code>udpc_trace</code>, up to 6 hours), a mark that the notice was closed (<code>udpc_notice</code>) and the chosen language (<code>udpc_lang</code>); cleared together with the site data</td></tr>
+<tr><td><b>Nodes and volunteer servers</b> (if you install them)</td><td>operation of the check network</td><td>callsign, network, country, approximate city, type of system, key hash; for a volunteer server also its IP (not shown publicly) while it takes part</td></tr>
+</table>
+<p class="muted">Database backups are encrypted and kept for up to 14 days; they hold the same set as the database itself: visitors' IPs are not there, volunteer servers' IPs are.</p>
+<p class="muted">The only exception to “IP is not written to logs”: the servers' system log records the addresses from which someone tries to guess a login over SSH (this is administrator login, not the site). They are kept for up to 30 days and are used to block bots and scanners automatically. Addresses of site visitors and of checks do not get there; rate counters live in memory and disappear on restart.</p>
+</div>
+
+<h2>4. What we do not do</h2>
+<div class="card"><ul>
+<li>we use no cookies, counters, advertising, third-party scripts or fonts;</li>
+<li>we do not sell or pass data to third parties;</li>
+<li>we do not try to find out who you are;</li>
+<li>we do not send your IP to third-party geolocation services: the geolocation databases are kept by us; network names are requested from RIPEstat and PeeringDB by network number only.</li>
+</ul></div>
+
+<h2>5. Who sees your IP</h2>
+<div class="card"><ul>
+<li>our hub (the site's server) and the project's anchor servers, which need to reply to you and build a route. They are in different countries, including outside yours, because foreign UDP cannot be checked otherwise;</li>
+<li>up to two checked volunteer servers per browser check: your browser sends them short UDP packets (STUN), so their owners can technically see the address;</li>
+<li>your provider and intermediate networks see the traffic itself just as they see any other traffic.</li>
+</ul></div>
+
+<h2>6. Basis and your consent</h2>
+<div class="card"><p>By pressing “Check my network” you ask the service to run a check and agree to data processing to the extent described; it is also our legitimate
+interest in operating the service. If you do not agree, do not press the button: the statistics pages can be read, your IP is also visible to the server for the duration of the request, but it is stored nowhere.
+You can withdraw consent at any time: clear the site data in your browser and do not run the check.</p></div>
+
+<h2>7. Your rights</h2>
+<div class="card"><p>You have the right to learn what data about you exists, to demand its correction or deletion, and to object to processing. Because we do not identify you,
+records of a specific person cannot be found by name or address, and so they cannot be provided or deleted. If you want your browser's records removed,
+send us the value of <code>udpc_cid</code> from your browser storage (on the page: F12 → Application / Storage → Local Storage → udpc_cid) and we will delete the related records.
+If you are in the European Union or the United Kingdom, you can also contact your data protection supervisory authority.</p></div>
+
+<h2>8. Security</h2>
+<div class="card"><p>Connections use HTTPS, servers are accessible by keys only, backups are encrypted, and the source code is open, so how the service works can be checked
+(<a href="https://github.com/Dagart-xyz/udpcheck/blob/main/PRIVACY-PRINCIPLES.md">privacy principles</a>). The service is not intended for children.</p></div>
+
+<h2>9. Changes</h2>
+<div class="card"><p>When the policy changes we publish a new revision with the date at the top of the page. Earlier revisions are kept in the repository history.</p></div>
+
+<p class="muted" style="margin-top:24px"><a href="/en/terms">Terms of use</a> · <a href="/en/">Home</a></p>
+</main>
+</body>
+</html>

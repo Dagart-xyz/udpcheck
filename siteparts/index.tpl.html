@@ -1,16 +1,16 @@
 <!doctype html>
-<html lang="ru">
+<html lang="@@LANG@@">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UDPcheck: режет ли провайдер UDP</title>
-<meta name="description" content="Узнайте, режет ли ваш провайдер UDP из-за рубежа и где обрывается маршрут. Готовый текст для техподдержки.">
+<title>@{title}</title>
+<meta name="description" content="@{meta_desc}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="UDPcheck">
-<meta property="og:title" content="UDPcheck: режет ли провайдер UDP">
-<meta property="og:description" content="Узнайте, режет ли ваш провайдер UDP из-за рубежа и где обрывается маршрут. Готовый текст для техподдержки.">
-<meta property="og:url" content="https://dagart.xyz/">
-<meta property="og:locale" content="ru_RU">
+<meta property="og:title" content="@{title}">
+<meta property="og:description" content="@{meta_desc}">
+<meta property="og:url" content="@@ORIGIN@@@@LP@@/">
+<meta property="og:locale" content="@@OGLOCALE@@">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b5fff'/%3E%3Cpath d='M6 21l6-10 5 7 3-4 6 7z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
@@ -176,135 +176,135 @@ button.btn.ghost{border:1px solid var(--line)}
 </style>
 </head>
 <body>
-<div id="langhint" hidden><span>This site is also available in English.</span> <a id="langhintLink" href="/en/" hreflang="en" lang="en">English</a><button type="button" id="langhintClose" aria-label="Close">×</button></div>
+<div id="langhint" hidden><span>@{langhint_text}</span> <a id="langhintLink" href="@@ALTHOME@@" hreflang="@@ALTLANG@@" lang="@@ALTLANG@@">@{langhint_link}</a><button type="button" id="langhintClose" aria-label="@{langhint_close}">×</button></div>
 <div class="wrap">
   <header>
-    <a class="logo" href="/" id="logo" style="text-decoration:none;color:inherit">UDP<span>check</span></a>
-    <nav><a href="/#providers">Провайдеры</a><a href="/#journal">Журнал</a><a href="/#how">Кто есть кто</a><a href="/#nodes">Узлы</a><a href="/#node">Свой узел</a><a id="langsw" href="/en/" hreflang="en" lang="en" title="English version">EN</a></nav>
+    <a class="logo" href="@@LP@@/" id="logo" style="text-decoration:none;color:inherit">UDP<span>check</span></a>
+    <nav><a href="@@LP@@/#providers">@{nav_providers}</a><a href="@@LP@@/#journal">@{nav_journal}</a><a href="@@LP@@/#how">@{nav_who}</a><a href="@@LP@@/#nodes">@{nav_nodes}</a><a href="@@LP@@/#node">@{nav_node}</a><a id="langsw" href="@@ALTHOME@@" hreflang="@@ALTLANG@@" lang="@@ALTLANG@@" title="@{langsw_title}">@{langsw_label}</a></nav>
   </header>
 
   <div class="hero">
-    <h1>Режет ли ваш провайдер UDP?</h1>
-    <noscript><p class="err">Для работы сайта нужен JavaScript: проверка идёт из вашего браузера.</p></noscript>
-    <p class="lead">Нажмите кнопку и узнайте, режется ли UDP. Если режется, получите готовый текст для техподдержки с местом обрыва маршрута.</p>
+    <h1>@{h1}</h1>
+    <noscript><p class="err">@{noscript}</p></noscript>
+    <p class="lead">@{lead}</p>
     <div class="cta">
-      <button class="go" id="go" type="button">Проверить мою сеть</button>
-      <span class="hint">Выключите VPN и обход блокировок, иначе проверится он, а не провайдер. Занимает около 10 секунд.</span>
+      <button class="go" id="go" type="button">@{btn_go}</button>
+      <span class="hint">@{hint}</span>
     </div>
-    <p class="consent">Нажимая кнопку, вы соглашаетесь с <a href="/terms">условиями</a> и <a href="/privacy">политикой</a>: на время проверки сервис использует ваш IP-адрес, в базу он не записывается.</p>
+    <p class="consent">@{consent}</p>
 
     <div id="result" aria-live="polite">
       <div class="card answer" id="answer"></div>
       <div class="card" id="udpweb"></div>
       <div class="card" id="support"></div>
-      <div class="card"><details id="routes"><summary>Маршруты до вас подробно</summary><div id="routesBody"></div></details></div>
+      <div class="card"><details id="routes"><summary>@{routes_summary}</summary><div id="routesBody"></div></details></div>
     </div>
   </div>
 
   <section id="providers">
-    <h2>Провайдеры</h2>
-    <p class="muted small" style="margin:-6px 0 12px">Статус по замерам узлов и проверкам посетителей за последние 6 часов. График показывает долю замеров, где UDP из-за рубежа не проходит. Нажмите на карточку: подробный график, итоги по серверам и маршруты. Карточка провайдера появляется сама, как только в его сети сделают проверку или заработает узел.</p>
-    <div class="psearch"><input id="psearch" type="search" placeholder="Найти: название или номер AS" autocomplete="off" aria-label="Найти провайдера"></div>
-    <div class="pgrid" id="pgrid"><div class="muted small">Загружаю…</div></div>
+    <h2>@{h2_providers}</h2>
+    <p class="muted small" style="margin:-6px 0 12px">@{providers_help}</p>
+    <div class="psearch"><input id="psearch" type="search" placeholder="@{search_ph}" autocomplete="off" aria-label="@{search_aria}"></div>
+    <div class="pgrid" id="pgrid"><div class="muted small">@{loading}</div></div>
     <div class="pmore" id="pmore" hidden></div>
     <details id="hostbox" style="margin-top:14px" hidden>
-      <summary>Хостинги и VPN: <span id="hostcount"></span></summary>
-      <p class="muted small" style="margin:8px 0 12px">Сюда попадают проверки, сделанные с включённым VPN или с серверов: адрес принадлежит хостингу, а не обычному провайдеру, поэтому в основной список они не входят.</p>
+      <summary>@{host_summary}</summary>
+      <p class="muted small" style="margin:8px 0 12px">@{host_help}</p>
       <div class="pgrid" id="pgrid2"></div>
     </details>
   </section>
 
   <section id="journal">
-    <h2>Журнал</h2>
-    <p class="muted small" style="margin:-6px 0 12px">Когда у провайдера менялась картина: сеть впервые появилась в проверках, статус сменился, или одна из проверок показала порезку там, где её раньше не было. Хостинги и VPN сюда не попадают.</p>
-    <div class="card"><div id="jlist" class="small muted">Загружаю…</div></div>
+    <h2>@{h2_journal}</h2>
+    <p class="muted small" style="margin:-6px 0 12px">@{journal_help}</p>
+    <div class="card"><div id="jlist" class="small muted">@{loading}</div></div>
   </section>
 
   <section id="provider"></section>
 
   <section id="how">
-    <h2>Кто есть кто</h2>
+    <h2>@{h2_who}</h2>
     <div class="grid three">
-      <div class="card step"><b>Вы</b><small>Нажимаете кнопку. Браузер шлёт UDP на наши серверы и спрашивает, получили ли они запросы, а серверы строят маршрут до вас.</small></div>
-      <div class="card step"><b>Узел: спрашивает</b><small>Домашний компьютер или роутер добровольца. Раз в 15 минут сам шлёт пакеты наружу и смотрит, вернулись ли ответы. Проверяет свою сеть, где режут UDP.</small></div>
-      <div class="card step"><b>Опорный сервер: отвечает</b><small>Сервер или VPS с публичным IP. Принимает пакеты и отвечает на них, сам ничего не проверяет. Это точка отсчёта в стране и за рубежом.</small></div>
+      <div class="card step"><b>@{step1_b}</b><small>@{step1_s}</small></div>
+      <div class="card step"><b>@{step2_b}</b><small>@{step2_s}</small></div>
+      <div class="card step"><b>@{step3_b}</b><small>@{step3_s}</small></div>
     </div>
-    <p class="small muted" style="margin:12px 0 0">Установщик сам выбирает роль: машина с публичным IP становится опорным сервером, домашняя сеть становится узлом. Вывод «режется или нет» строится по опорным серверам проекта. Серверы добровольцев участвуют в проверках как независимые свидетели: они могут смягчить вывод («режется выборочно»), но обвинить провайдера сами не могут. В стране, где серверов проекта нет, они служат точкой отсчёта.</p>
+    <p class="small muted" style="margin:12px 0 0">@{who_note}</p>
   </section>
 
   <section id="nodes">
-    <h2>Узлы и опорные серверы</h2>
+    <h2>@{h2_nodes}</h2>
     <div class="card">
-      <h3 style="margin-top:0">Опорные серверы проекта</h3>
-      <p class="small muted" style="margin:0 0 6px">Для каждого посетителя и узла точкой отсчёта служат серверы из его страны, все остальные считаются зарубежными.</p>
+      <h3 style="margin-top:0">@{h3_anchors}</h3>
+      <p class="small muted" style="margin:0 0 6px">@{anchors_help}</p>
       <div id="anchors"></div>
-      <h3>Опорные серверы добровольцев</h3>
-      <div id="refsSummary" class="small muted">Загружаю…</div>
+      <h3>@{h3_refs}</h3>
+      <div id="refsSummary" class="small muted">@{loading}</div>
       <div class="nodegrid" id="refsGrid"></div>
-      <h3 style="margin-top:18px">Узлы</h3>
-      <div id="nodesSummary" class="small muted">Загружаю…</div>
+      <h3 style="margin-top:18px">@{h3_nodes}</h3>
+      <div id="nodesSummary" class="small muted">@{loading}</div>
       <div class="nodegrid" id="nodesGrid"></div>
     </div>
   </section>
 
   <section id="node">
-    <h2>Подключить свой сервер или роутер</h2>
+    <h2>@{h2_node}</h2>
     <div class="card">
-      <p style="margin-top:0">Одна строка для Linux и OpenWrt, нужен root или sudo. Установщик сам выберет роль: <b>VPS или сервер с публичным IP</b> станет опорным сервером (нужно открыть UDP 47321, 47322 и TCP 47321), <b>домашняя сеть или роутер</b> станет узлом (открывать ничего не нужно).</p>
-      <div class="cmdrow"><div class="t">Установка</div><pre class="cmd" id="c1">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh</pre><button class="copy" data-for="c1" type="button">Скопировать</button></div>
-      <details style="margin-top:12px"><summary>Подробнее: что делает установщик, как отключить опорную роль, удалить, Windows</summary>
-        <p class="small muted">Определит систему, при необходимости поставит Python, скачает агент и сверит SHA-256, запустит службу под пользователем без прав. SSH и другие службы не трогает. Фаервол сам не меняет: если порты опорной роли окажутся закрыты, покажет, какие именно, и предложит открыть их, но только с вашего согласия. Перед началом покажет план и подождёт 5 секунд (отмена Ctrl+C). Код: <a href="/install-node.sh">install-node.sh</a>. Если опорный сервер недоступен снаружи (фаервол, NAT), он остаётся неактивным, пока порты не откроют.</p>
-        <div class="cmdrow"><div class="t">Принудительно роль «узел» (сам проверяет сеть, ничего не слушает)</div><pre class="cmd" id="c4">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | UDPCHECK_ROLE=node sh</pre><button class="copy" data-for="c4" type="button">Скопировать</button></div>
-        <div class="cmdrow"><div class="t">Принудительно роль «опорный сервер» (только отвечает на проверки)</div><pre class="cmd" id="c5">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | UDPCHECK_ROLE=ref sh</pre><button class="copy" data-for="c5" type="button">Скопировать</button></div>
-        <div class="cmdrow"><div class="t">Удалить (служба, файлы, токен)</div><pre class="cmd" id="c3">(curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh -s -- uninstall</pre><button class="copy" data-for="c3" type="button">Скопировать</button></div>
-        <div class="cmdrow"><div class="t">Windows (PowerShell, нужен Python 3.7+). На macOS то же через curl и python3</div><pre class="cmd" id="c2">iwr https://dagart.xyz/node/udpcheck_node.py -OutFile udpcheck_node.py; python udpcheck_node.py</pre><button class="copy" data-for="c2" type="button">Скопировать</button></div>
-        <p class="small muted" style="margin-bottom:0">Если на пути работает прокси, VPN или туннель, узел это заметит, и такой замер не учтётся.</p>
+      <p style="margin-top:0">@{node_intro}</p>
+      <div class="cmdrow"><div class="t">@{cmd_install}</div><pre class="cmd" id="c1">(curl -fsSL https://dagart.xyz@@LP@@/i 2>/dev/null || wget -qO- https://dagart.xyz@@LP@@/i) | sh</pre><button class="copy" data-for="c1" type="button">@{btn_copy}</button></div>
+      <details style="margin-top:12px"><summary>@{details_summary}</summary>
+        <p class="small muted">@{details_text}</p>
+        <div class="cmdrow"><div class="t">@{cmd_node}</div><pre class="cmd" id="c4">(curl -fsSL https://dagart.xyz@@LP@@/i 2>/dev/null || wget -qO- https://dagart.xyz@@LP@@/i) | UDPCHECK_ROLE=node sh</pre><button class="copy" data-for="c4" type="button">@{btn_copy}</button></div>
+        <div class="cmdrow"><div class="t">@{cmd_ref}</div><pre class="cmd" id="c5">(curl -fsSL https://dagart.xyz@@LP@@/i 2>/dev/null || wget -qO- https://dagart.xyz@@LP@@/i) | UDPCHECK_ROLE=ref sh</pre><button class="copy" data-for="c5" type="button">@{btn_copy}</button></div>
+        <div class="cmdrow"><div class="t">@{cmd_uninstall}</div><pre class="cmd" id="c3">(curl -fsSL https://dagart.xyz@@LP@@/i 2>/dev/null || wget -qO- https://dagart.xyz@@LP@@/i) | sh -s -- uninstall</pre><button class="copy" data-for="c3" type="button">@{btn_copy}</button></div>
+        <div class="cmdrow"><div class="t">@{cmd_windows}</div><pre class="cmd" id="c2">iwr https://dagart.xyz/node/udpcheck_node.py -OutFile udpcheck_node.py; python udpcheck_node.py</pre><button class="copy" data-for="c2" type="button">@{btn_copy}</button></div>
+        <p class="small muted" style="margin-bottom:0">@{details_proxy}</p>
       </details>
     </div>
   </section>
 
   <section id="help-anchor">
-    <h2>Нет опоры в вашей стране? Добавьте сервер</h2>
+    <h2>@{h2_help}</h2>
     <div class="card">
-      <p style="margin-top:0">Чтобы сервис мог сравнивать «у вас» и «из-за рубежа», ему нужен опорный сервер в вашей стране. Пока таких нет, его роль могут выполнить серверы добровольцев.</p>
+      <p style="margin-top:0">@{help_intro}</p>
       <ol class="clean" style="padding-left:20px">
-        <li>Нужен сервер или VPS в вашей стране: Linux, публичный IPv4 (не за NAT).</li>
-        <li>Откройте в фаерволе UDP 47321, 47322 и TCP 47321.</li>
-        <li>Запустите строку установки из раздела «Подключить свой сервер»: сервер с публичным IP сам станет опорным. Через минуту он появится в списке опорных серверов добровольцев.</li>
+        <li>@{help_li1}</li>
+        <li>@{help_li2}</li>
+        <li>@{help_li3}</li>
       </ol>
-      <p class="small muted" style="margin-bottom:0">Сервер добровольца участвует в проверках посетителей и узлов как независимый свидетель: может смягчить вывод («режется выборочно»), но обвинить провайдера сам не может. Там, где серверов проекта нет, он служит точкой отсчёта. IP сервера станет известен узлам и браузерам посетителей, которых он проверяет.</p>
+      <p class="small muted" style="margin-bottom:0">@{help_note}</p>
     </div>
   </section>
 
   <section id="privacy">
-    <h2>Что мы видим и храним</h2>
+    <h2>@{h2_privacy}</h2>
     <div class="card">
       <ul class="clean">
-        <li>Ваш IP виден на время запроса, чтобы построить маршрут и определить провайдера. <b>В базу он не записывается.</b></li>
-        <li>Храним номер сети провайдера (ASN), страну, примерный город и результаты замеров, 60 дней.</li>
-        <li>Страница создаёт в вашем браузере случайный анонимный номер: он нужен только для лимитов и подсчёта проверок. Он не связан с вами и не собирает данные об устройстве. Удалить его можно, очистив данные сайта.</li>
-        <li>Публично: статистика по провайдерам и список узлов (позывной, сеть, число замеров). Адресов и городов нет.</li>
-        <li>Опорный сервер добровольца: его IP знают хаб, узлы, которым хаб назначил этот сервер, и браузеры посетителей, которых он помогает проверять (до двух таких серверов за проверку). Сервер видит IP узлов и посетителей так же, как видит любой STUN-сервер в интернете. Трассировки до адреса посетителя ему не передаются. Домашний узел IP никому не отдаёт.</li>
-        <li>Вопросы, удаление данных, замечания по логотипам и названиям провайдеров: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a>.</li>
-        <li>Проект тестовый. Выводы относятся к проверенным серверам и к моменту замера.</li>
+        <li>@{priv_li1}</li>
+        <li>@{priv_li2}</li>
+        <li>@{priv_li3}</li>
+        <li>@{priv_li4}</li>
+        <li>@{priv_li5}</li>
+        <li>@{priv_li6}</li>
+        <li>@{priv_li7}</li>
       </ul>
     </div>
   </section>
 
   <footer>
-    <div id="attr">IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). Названия городов: <a href="https://www.geonames.org">GeoNames</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). Названия и типы сетей: <a href="https://stat.ripe.net">RIPEstat</a> (RIPE NCC) и <a href="https://www.peeringdb.com">PeeringDB</a>.</div>
-    <div><a href="/privacy">Политика данных</a> · <a href="/terms">Условия</a> · <a href="/protocol.txt">Протокол узлов</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Исходный код (AGPL-3.0)</a> · Связь: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a></div>
+    <div id="attr">@{footer_attr}</div>
+    <div>@{footer_links}</div>
   </footer>
 </div>
 
-<div id="notice" hidden><span>Мы не используем cookie и счётчики; в браузере хранится только случайный номер для лимитов. <a href="/privacy">Подробнее</a></span><button type="button" id="noticeBtn">Понятно</button></div>
-<div id="newver" hidden><span>Вышла новая версия сайта.</span><button type="button" class="btn" id="newverBtn">Обновить</button></div>
+<div id="notice" hidden><span>@{notice_text}</span><button type="button" id="noticeBtn">@{notice_btn}</button></div>
+<div id="newver" hidden><span>@{newver_text}</span><button type="button" class="btn" id="newverBtn">@{newver_btn}</button></div>
 <script>
 (function(){
 "use strict";
 var BUILD = "__BUILD__";
 // Язык страницы, префикс адресов и тексты интерфейса (словарь подставляет сборка: siteparts/strings.py)
-var LANG = "ru", LP = "", I18N = {"ago_lt2":"меньше двух минут назад","ago_min":"{n} мин назад","ago_h":"{n} ч назад","verd_cut":"Режется","verd_partial":"Режется частично","verd_ok":"Не режется","verd_unreliable":"Замер ненадёжен","verd_noanchor":"Не на что опираться","verd_in_cut_line":"UDP из-за рубежа до вас не доходит","verd_in_cut_what":"Звонки, игры, QUIC и VPN по UDP с зарубежными серверами могут работать плохо или совсем не работать. Внутри страны UDP при этом идёт нормально.","verd_out_cut_line":"UDP за рубеж от вас не уходит","verd_out_cut_what":"Исходящий UDP к зарубежным серверам блокируется. До точки в вашей стране UDP идёт нормально.","verd_partial_line":"UDP проходит не ко всем зарубежным серверам","verd_partial_what":"К части серверов UDP идёт, к другим нет: фильтр выборочный.","verd_ok_line":"UDP проходит и внутри страны, и из-за рубежа","verd_ok_what":"Блокировки UDP на проверенных серверах не видно.","verd_ctrl_bad_line":"контрольная точка в вашей стране не прошла","verd_ctrl_bad_what":"Вывод по зарубежным серверам в этом случае недостоверен.","verd_ctrl_down_line":"контроль в вашей стране не ответил","verd_unstable_line":"запросы к разным серверам вышли с разных адресов","verd_unstable_what":"Так бывает при раздельной маршрутизации, VPN, прокси, а у некоторых операторов просто из-за устройства сети. Честно сравнить серверы нельзя, в общую статистику такой результат не передаётся.","verd_noanchor_line":"в вашей стране у проекта нет опорного сервера","verd_noanchor_what":"Нет опорного сервера в вашей стране, поэтому сравнить «у вас» и «из-за рубежа» нельзя. Вы можете помочь: добавьте сервер из вашей страны.","verd_noforeign_line":"зарубежные серверы не ответили","help_link_default":"Как добавить сервер","help_how_help":"Как помочь","help_how_add":"Как добавить","help_how_service":"Как помочь сервису","size_cut_text":"Короткие ответы проходят, а длинные ({big} байт) от {n} {servers} не доходят. Похоже, UDP режут по размеру пакета. Но причина может быть и в порту: длинные ответы идут с портов {ports}.","size_part_text":"Длинные ответы доходят не всегда (часть потеряна): возможна порезка по размеру пакета или просто нестабильная связь.","size_ok_text":"Длинные ответы (до {max} байт) тоже доходят.","comm_name":"{country}, сервер добровольца","web_title":"UDP-проверка прямо из вашего браузера","web_running":"Шлём несколько маленьких UDP-запросов на наши серверы и ждём ответы…","web_unsupported":"Ваш браузер не поддерживает WebRTC, поэтому проверку из браузера сделать нельзя.","web_error":"Не удалось получить список серверов для проверки.","web_explain":"Каждый сервер получает несколько маленьких UDP-запросов и должен ответить. Ответ дошёл до вас: входящий UDP с этого сервера проходит. Затем серверы проекта отвечают длинными пакетами (600 и 1200 байт) с других портов: так видно, не режут ли UDP по размеру. Тест слабее замера узла (мало пакетов, нет потока).","web_home":"в вашей стране","web_foreign":"из-за рубежа","web_answers":"ответов {ok} из {n}","web_witness":"свидетель: сам вывод не определяет","web_seen_lost":"входящий UDP от этого сервера до вас не доходит: он получил ваши запросы и отправил ответы","web_seen_got":"сервер ваши запросы получил","web_seen_none":"исходящий UDP до этого сервера не доходит: запросы не дошли","web_pad":"длинные ответы: {list}","web_pad_item":"{size} Б: {ok} из {n}","web_mixed":"Серверы увидели вас с разных внешних адресов, поэтому проверка не сравнивает провайдера честно. В статистику она не передана.","web_seen_failed":"Подтверждение от серверов, дошли ли ваши запросы, получить не удалось: о направлении потери судить нельзя.","web_ctrl_bad":"Серверы в вашей стране не ответили: возможно, включён VPN, браузер блокирует WebRTC или проблема с сетью. Вывод ненадёжен.","web_noanchor":"В вашей стране у нас пока нет опорного сервера, сравнивать не с чем.","ans_nodata":"Нет данных","ans_noref":"Нет точки отсчёта","tcp_ok_note":"TCP до тех же серверов при этом проходит: не работает именно UDP.","ans_prelim":"Предварительно","ans_by_nodes":"По данным узлов","ans_basis":"Основание: {rounds} {meas} от {nodes} {nodew} вашего провайдера за 24 часа, такой итог в {top} из {rounds}. Последний замер: {last}.","ans_weak_note":"Данных мало: нужно хотя бы 2 узла и 5 замеров для уверенного вывода.","ans_by_browser":"По проверке в вашем браузере","ans_browser_note":"У вашего провайдера пока нет узлов, ответ основан на UDP-проверке из браузера (несколько маленьких пакетов, слабее замера узла)","ans_long_big":"Режутся длинные пакеты","ans_long_line":"короткие UDP-ответы доходят, длинные нет","ans_long_unchecked":"Длинные пакеты и сплошной поток не проверялись","ans_unknown_big":"Пока не знаем","ans_unknown_line":"у вашего провайдера нет узлов, прямой проверки UDP нет","ans_unknown_what":"Маршруты и текст для техподдержки ниже всё равно можно использовать. Чтобы получить точный ответ, подключите узел (раздел «Свой узел») или попросите кого-то с тем же провайдером.","ans_isp":"Ваш провайдер по базе IP: {isp}","ans_isp_unknown":"не определён","ans_city":"{city} (приблизительно)","ans_browser_now":"Проверка в вашем браузере прямо сейчас: {verdict}.","list_and":"и","cm_prov_unknown":"оператор не определён","cm_subject":"Тема: не проходит входящий UDP-трафик из-за рубежа (проверка {date}, {tz})","cm_greeting":"Добрый день. Моё подключение к интернету: {prov}. Прошу рассмотреть обращение по существу.","cm_problem_part":"Проблема: UDP-пакеты от части серверов за рубежом до меня не доходят ({bad}), ответы на мои UDP-запросы к ним не приходят. До остальных зарубежных серверов и до серверов внутри моей страны UDP доходит.","cm_problem_all":"Проблема: UDP-пакеты от серверов за рубежом до меня не доходят, ответы на мои UDP-запросы к ним не приходят. От серверов внутри моей страны UDP доходит.","cm_what":"Что показала проверка независимыми серверами проекта dagart.xyz (выполнена при выключенных VPN и прокси):","cm_home":"Серверы в моей стране ({cities}): ответов на мои UDP-запросы {ok} из {n}. Канал работает.","cm_foreign":"Зарубежные серверы: {list}.","cm_foreign_item":"{name}: {ok} из {n}","cm_got":"Эти серверы подтверждают, что мои запросы получили{replied} ({cities}), а ответы до меня не дошли: потеряно именно движение к моему адресу из-за рубежа.","cm_got_replied":" и отправили на них ответы","cm_nodes":"Узлы проекта в вашей сети ({n} {nodes}): в {top} из {rounds} замеров за сутки {tail}","cm_nodes_in":"пакеты до зарубежных серверов доходят (серверы это подтверждают), а ответы обратно не приходят.","cm_nodes_part":"UDP до части зарубежных серверов не проходит.","cm_tcp":"TCP до тех же зарубежных серверов с узлов проекта в вашей сети проходит ({ok} из {total} проверок, данные передаются в обе стороны): серверы и маршрут доступны, не работает именно UDP.","cm_long":"За {span} наблюдений: {cut} из {total} замеров узлов проекта в вашей сети с тем же результатом.","cm_routes":"Маршруты от зарубежных серверов до моего адреса замолкают: {list}. Дальше, до меня, ответов нет.{stale}","cm_route_item":"{cities} — {where}{as}","cm_in_net":"внутри вашей сети ","cm_in_as":"в сети ","cm_stale":"Маршруты сняты {date}.","cm_why1":"Почему это не авария: серверы в моей стране отвечают в тот же момент, то есть канал работает","cm_why_tcp":", а TCP до тех же зарубежных серверов проходит","cm_why2":"; теряется один вид трафика (UDP из-за рубежа)","cm_why_countries":", причём сразу от серверов в {n} {countries} ({list}), которые друг от друга не зависят","cm_why_long":", и так продолжается {span}","cm_why_end":". Если вы считаете это аварией, укажите её номер, время начала и срок устранения.","cm_ask":"Прошу ответить письменно:","cm_q1":"Применяется ли на вашей сети или у вышестоящих операторов фильтрация входящего UDP из-за рубежа (в том числе оборудованием, установленным по требованию регулятора)?","cm_q2":"Если нет, в каком месте, по вашим данным, теряются пакеты?","cm_q3":"Когда доступ будет восстановлен в полном объёме?","cm_foot":"Проверку можно повторить самостоятельно: https://dagart.xyz (кнопка «Проверить мою сеть»). Результаты по провайдерам открыты.","sup_title":"Текст для техподдержки","sup_noref":"Для вашей страны пока нет точки отсчёта, поэтому обращение к провайдеру подготовить нельзя.","sup_unreliable":"Проверка из браузера ненадёжна: запросы к разным серверам вышли с разных адресов (раздельная маршрутизация, VPN, прокси). Обращение по такому результату готовить нельзя: повторите проверку с устройства, у которого весь трафик идёт одним путём.","sup_none":"Блокировки UDP не видно, поэтому обращение провайдеру не нужно. Если связь всё же плохая, повторите проверку позже или запустите её без VPN.","sup_ready":"Готов к отправке, ваши данные уже подставлены. Перед отправкой убедитесь, что VPN и прокси на устройстве выключены: текст на это ссылается.","btn_copy_text":"Скопировать текст","btn_copied":"Скопировано","btn_again":"Проверить ещё раз","btn_checking":"Проверяю…","go_detecting":"Определяю провайдера и данные узлов…","report_limited":"В общую статистику результат этого часа уже передан: лимит защищает её от накруток и общий для вашей сети. Ваш ответ выше от этого не зависит.","me_error":"Не удалось получить данные узлов.","trace_429":"Трассировку можно запускать не чаще раза в 5 минут (общий лимит для вашей сети). Повторите через {min} {minutes}.","trace_error":"Не удалось запустить трассировку.","net_error":"Нет связи с сервером. Проверьте интернет.","rt_stale":"Новую трассировку можно будет запустить через {min} {minutes} (не чаще раза в 5 минут). Ниже маршруты, снятые {date}.","rt_all_reach":"Маршруты со всех серверов доходят до вас.","rt_home_only":"Из вашей страны маршрут до вас доходит, из-за рубежа нет: обрыв на пути между сетями, не у вас дома.","rt_none":"Ни один маршрут, даже из вашей страны, не дошёл до вашего устройства до конца: домашний роутер и оборудование оператора обычно не отвечают на трассировку, хотя связь при этом работает. Поэтому по маршрутам вывод не делаем, ориентируйтесь на UDP-проверки выше.","rt_from_home":"Из вашей страны","rt_from_foreign":"Из-за рубежа","rt_pending":"ждём результат…","rt_timeout":"сервер не успел ответить","rt_nodata":"нет данных","rt_reached":"дошли до вас","rt_silent":"дальше ответов нет","pst_noanchor":"Нет опорного сервера в стране","pst_cut":"Режется","pst_partial":"Режется частично","pst_ok":"Не режется","pst_stale":"Нет свежих данных","pst_old":"(давно)","prov_sizecut":"⚠ длинные UDP-пакеты не проходят","pf_hour":"за час: {n}","pf_day":";  сутки: {n}","pf_web":" (из них посетителей: {n})","pf_asns":";  сетей оператора: {n}","pf_last":";  последний замер {ago}","pf_weak":";  мало данных","jst_cut":"режется","jst_partial":"режется частично","jst_ok":"не режется","jst_stale":"нет свежих данных","jst_noanchor":"нет опорного сервера в стране","j_ev":" (проверок за 6 часов: {checks}{browsers})","j_ev_browsers":", браузеров: {n}","j_new":"впервые в проверках: {st}{ev}","j_change":"{old} → {new}{ev}","j_cc_many":"у посетителей ({n}) этой сети ","j_cc_one":"у одного посетителя этой сети ","j_cc_in":"входящий UDP из-за рубежа не доходит (из России доходит)","j_cc_in_ok":". Исходящий уходит: зарубежные серверы получили запросы и отправили ответы (серверов: {n})","j_cc_out_cap":"Исходящий UDP за рубеж не уходит: зарубежные серверы запросов не получили","j_cc_out":"исходящий UDP за рубеж не уходит: зарубежные серверы запросов не получили","j_cc_tail":". Причина может быть у провайдера или у самих посетителей","j_cc_before":" (до этого: {st})","j_size":"у посетителей ({n}) этой сети короткие UDP-пакеты проходят, а длинные ({size} байт) нет. Возможно, режут по размеру пакета","journal_error":"Не удалось загрузить журнал.","journal_empty":"Пока записей нет.","prov_nothing":"Ничего не найдено. Если вашего провайдера нет в списке, нажмите «Проверить мою сеть»: он появится после проверки.","prov_nodata":"Пока нет данных. Нажмите «Проверить мою сеть» или подключите узел, и ваш провайдер появится здесь.","prov_more":"Показать ещё ↓","prov_more_cnt":"{n} из {rest}","load_error":"Не удалось загрузить данные.","tst_ok":"чисто","tst_incut":"ответы не приходят","tst_outcut":"до сервера не доходит","tst_part":"на части портов","tst_mixed":"смешанно","tst_lossy":"с потерями","tst_nodata":"нет данных","pd_back":"← Все провайдеры","pd_404":"По этой сети пока нет данных.","title_suffix":": режет ли UDP | UDPcheck","pd_nets":"Сети оператора: {list}","pd_tag_hosting":"хостинг или VPN, не обычный провайдер","pd_tag_old":"данные устарели: замеров за последние 6 часов нет","pd_tag_weak":"мало данных: нужно хотя бы 5 замеров или проверок","pd_size_bad":"Длинные UDP-пакеты (до {max} байт) не доходят у {cut} из {tested} посетителей за сутки, а короткие доходят. Возможно, режут по размеру пакета.","pd_size_ok":"Длинные UDP-пакеты (до 1200 байт) доходят: проверено у {tested} {visitors} за сутки.","pd_hour":"за час","pd_day":"за сутки","pd_week":"за 7 суток","pd_nodes":"узлов за сутки","pd_web":"проверок посетителей за сутки","pd_last":"последний замер: {ago}","pd_typical":"Типичный итог за сутки ({top} из {rounds} замеров): {txt}","pd_changes":"Как менялась картина","pd_changes_help":"Каждый столбик — один час. Красная часть — доля замеров, где UDP из-за рубежа не проходит, зелёная — проходит, серая — замеры ненадёжны.","pd_ago24":"24 часа назад","pd_ago7d":"7 суток назад","pd_now":"сейчас","pd_24h":"24 часа","pd_7d":"7 суток","pd_history":"История статуса","pd_servers":"До каких серверов доходит UDP (за сутки)","pd_nodata":"Пока нет данных.","pd_control":"(контроль: та же страна, что у провайдера)","pd_tcp":"TCP: {ok} из {total}","pd_cuts":"Где замолкают маршруты (за 7 суток)","pd_cut_foreign":"из-за рубежа","pd_cut_home":"из страны провайдера","pd_cuts_none":"Трассировок пока нет.","pd_cuts_note":"Обрыв в трассировке не доказывает, что режет именно эта сеть: домашнее и пограничное оборудование часто не отвечает на трассировку. Если маршруты из страны провайдера замолкают там же, это нормально.","pd_nodes_title":"Узлы в этой сети","pd_nodes_none":"сейчас нет узлов на связи","pd_web_line":"Проверок из браузера посетителей за сутки: {wn}, из них с блокировкой: {wc}.","pd_disclaimer":"Это автоматические измерения: они показывают, проходит ли UDP между сетью и серверами проекта в момент замера. Причина потерь может быть не у провайдера (транзитные сети, оборудование и настройки пользователей). Подробнее в условиях использования. Нашли ошибку или хотите уточнить данные: draldrean@protonmail.com.","pd_terms":"Условия использования","pd_cta":"Вы в этой сети? Проверить своё подключение","pd_net_error":"Нет связи с сервером.","nodes_error":"Не удалось загрузить список узлов.","nd_country_unknown":"Страна не определена","nd_active":"активен","nd_silent":"не отвечает хабу","nd_anchor_checks":"проверок посетителей за сутки: {checks}, ответил: {ok}","nd_nodes_sum":"Узлов в сети: {n}, сейчас на связи: {on}.","nd_nodes_none":"Пока ни одного узла. Станьте первым: команда ниже.","nd_refs_sum":"Серверов добровольцев: {n}, активных: {a}.","nd_refs_none":"Пока нет. Добавьте сервер: команда ниже.","nd_inactive":"не активен","nd_outdated":"есть новая версия агента","nd_outdated_title":"Обновить можно той же командой установки. Старая версия продолжит работать.","nd_isp_unknown":"провайдер не определён","nd_place_unknown":"место не определено","nd_online":"на связи","nd_offline":"не на связи","nd_ref_checks":"проверок за сутки {checks}, чисто {ok}","nd_rounds":"замеров: {n}","nd_tunnel":"(ещё {n} отбраковано из-за прокси)","u_server_of":["сервера","серверов","серверов"],"u_measure":["замер","замера","замеров"],"u_node_of":["узла","узлов","узлов"],"u_node_nom":["узел","узла","узлов"],"u_hour":["час","часа","часов"],"u_day":["сутки","суток","суток"],"u_minute_acc":["минуту","минуты","минут"],"u_country_in":["стране","странах","странах"],"u_visitor_of":["посетителя","посетителей","посетителей"],"u_server_nom":["сервер","сервера","серверов"],"loading":"Загружаю…","btn_copy":"Скопировать"};
+var LANG = "@@LANG@@", LP = "@@LP@@", I18N = @@I18N@@;
 var TITLE0 = document.title;
 function fmt(s, p){ return p ? s.replace(/\{(\w+)\}/g, function(m, k){ return p[k] != null ? p[k] : m; }) : s; }
 function tt(k, p){ var v = I18N[k]; return v == null ? k : fmt(v, p); }

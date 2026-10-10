@@ -269,6 +269,7 @@ start_service() {
 	procd_open_instance
 	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --config /etc/udpcheck-node/config.json
 	procd_set_param user nobody
+	procd_set_param env UDPCHECK_LANG=ru
 	procd_set_param no_new_privs 1
 	procd_set_param respawn 3600 20 0
 	procd_set_param stdout 1
@@ -406,6 +407,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --config /var/lib/udpcheck-node/config.json
+Environment=UDPCHECK_LANG=ru
 # Временный пользователь без прав; состояние (токен узла) только в /var/lib/udpcheck-node.
 DynamicUser=yes
 StateDirectory=udpcheck-node

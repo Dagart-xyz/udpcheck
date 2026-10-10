@@ -1,0 +1,36 @@
+[Unit]
+Description=udpcheck: замедлитель роботов (ответы без признаков браузера идут с задержкой, не блокируются)
+After=network.target caddy.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/udpcheck/udpcheck-tarpit.py
+Restart=always
+RestartSec=3
+DynamicUser=yes
+MemoryMax=96M
+TasksMax=16
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

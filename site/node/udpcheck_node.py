@@ -32,10 +32,103 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "0.4"
+VERSION = "0.5"
 DEFAULT_HUB = "https://dagart.xyz"
 UDP2 = struct.Struct("!4sBB8sI4s")      # magic ver flags taskid seq mac = 22 байта
 TCP2 = struct.Struct("!4sBB8s4sI")      # magic ver mode taskid mac kb   = 22 байта
+
+
+def _ui_lang():
+    """Язык вывода: UDPCHECK_LANG (ru или en), иначе язык системы (русский: ru), иначе русский."""
+    v = (os.environ.get("UDPCHECK_LANG") or "").strip().lower()[:2]
+    if v in ("ru", "en"):
+        return v
+    for k in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        if os.environ.get(k):
+            return "ru" if os.environ[k].lower().startswith("ru") else "en"
+    try:                                           # Windows: язык интерфейса пользователя (0x19 = русский)
+        import ctypes
+        return "ru" if (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3ff) == 0x19 else "en"
+    except Exception:
+        return "ru"
+
+
+LANG_UI = _ui_lang()
+
+MSG = {
+    "ru": {
+        "reg_denied": "регистрация отклонена: %s %s",
+        "reg_ok": "Узел зарегистрирован. Позывной: %s. Провайдер по базе IP: %s",
+        "unknown": "не определён",
+        "ref_ports_busy": "Опорная роль не включена: порты UDP %s заняты другой программой.",
+        "hub_said": "хаб ответил %s", "hub_no_token": "хаб не узнал токен узла", "hub_no_ports": "хаб не достучался до портов",
+        "hub_noconn": "нет связи с хабом (%s)", "none": "нет",
+        "ref_on": "Опорная роль включена: сервер отвечает на проверки по заданиям хаба (%s). Он виден на сайте в списке опорных серверов добровольцев.",
+        "ref_off": ("Опорная роль не активна: %s. Узел работает как обычно; проверка повторится сама. Чтобы стать опорным, откройте "
+                    "снаружи UDP %s и TCP %d (фаервол и NAT настраиваете вы)."),
+        "checking": "  проверяю %s ...",
+        "cls_OK": "чисто", "cls_INCUT": "ответы не приходят", "cls_OUTCUT": "до цели не доходит", "cls_LOSSY": "потери выше нормы", "cls_NOREPORT": "цель не отчиталась",
+        "st_LOSSY": "проходит, но с потерями выше нормы", "st_OK": "чисто", "st_INCUT": "ответы не приходят", "st_OUTCUT": "до цели не доходит",
+        "st_PART": "проходит только на части портов", "st_MIXED": "смешанно", "st_NOREPORT": "цель не отчиталась",
+        "place_home": "в вашей стране", "place_foreign": "зарубеж",
+        "comm_line": "--- опорный сервер участника %s [%s]: %s, TCP: %s (%s) ---", "comm_control": "входит в итог как контроль", "comm_noverdict": "в итог не входит",
+        "target_line": "--- %s [%s]: %s, TCP: %s ---",
+        "port_line": "  порт %-6s дошло на цель: %-4s ответов получено: %-4s %s",
+        "verdict": "ВЫВОД: ",
+        "warn_src": "ВНИМАНИЕ: UDP вышел с другого адреса, чем HTTPS (VPN или обход на роутере). Результат искажён.",
+        "tunnel_hint": "Выключите прокси, VPN или туннель либо исключите из него адреса целей и повторите.",
+        "hub_rejected": "Хаб не принял результат: %s %s",
+        "help_hub": "адрес хаба (по умолчанию %s)", "help_config": "путь к файлу настроек", "help_once": "один замер сейчас и выход",
+        "help_ref": "то же, что --role both",
+        "help_role": "node: проверять свою сеть (по умолчанию); ref: только опорный сервер; both: и то и другое",
+        "banner": "udpcheck-node v%s. %s", "banner_ref": "Работаю опорным сервером.", "banner_node": "Выключите VPN и обход блокировок, иначе вы проверите их, а не провайдера.",
+        "no_task": "Хаб не выдал задание, повторите позже.",
+        "running": "Работаю постоянно. Позывной: %s. Роль: %s. Остановить: Ctrl+C.",
+        "role_node": "узел", "role_ref": "опорный сервер", "role_both": "узел и опорный сервер",
+        "ref_not_on": "Опорная роль не включена (%s).", "poll_err": "опрос хаба: %s %s",
+        "outdated": ("Доступна новая версия агента %s (у вас %s). Обновить: (curl -fsSL %s/i 2>/dev/null || wget -qO- %s/i) | sh. "
+                     "Срочности нет, старая версия продолжит работать."),
+        "got_task": "[%H:%M:%S] получено задание", "stopped": "Остановлено.", "hub_err": "Ошибка связи с хабом (%s). Повтор через %d с.",
+    },
+    "en": {
+        "reg_denied": "registration rejected: %s %s",
+        "reg_ok": "Node registered. Callsign: %s. Provider by IP database: %s",
+        "unknown": "not identified",
+        "ref_ports_busy": "Anchor role not enabled: UDP ports %s are taken by another program.",
+        "hub_said": "the hub answered %s", "hub_no_token": "the hub did not recognise the node token", "hub_no_ports": "the hub could not reach the ports",
+        "hub_noconn": "no connection to the hub (%s)", "none": "none",
+        "ref_on": "Anchor role enabled: the server answers checks on the hub's assignments (%s). It is visible on the site in the list of volunteer anchor servers.",
+        "ref_off": ("Anchor role is not active: %s. The node works as usual; the check will repeat on its own. To become an anchor, open "
+                    "UDP %s and TCP %d from outside (you configure the firewall and NAT)."),
+        "checking": "  checking %s ...",
+        "cls_OK": "clean", "cls_INCUT": "replies do not arrive", "cls_OUTCUT": "does not reach the target", "cls_LOSSY": "loss above normal", "cls_NOREPORT": "target did not report",
+        "st_LOSSY": "passes, but with loss above normal", "st_OK": "clean", "st_INCUT": "replies do not arrive", "st_OUTCUT": "does not reach the target",
+        "st_PART": "passes on some ports only", "st_MIXED": "mixed", "st_NOREPORT": "target did not report",
+        "place_home": "in your country", "place_foreign": "abroad",
+        "comm_line": "--- volunteer anchor server %s [%s]: %s, TCP: %s (%s) ---", "comm_control": "counted in the verdict as a control", "comm_noverdict": "not counted in the verdict",
+        "target_line": "--- %s [%s]: %s, TCP: %s ---",
+        "port_line": "  port %-6s reached the target: %-4s replies received: %-4s %s",
+        "verdict": "VERDICT: ",
+        "warn_src": "WARNING: UDP left from a different address than HTTPS (VPN or a bypass on the router). The result is distorted.",
+        "tunnel_hint": "Turn off the proxy, VPN or tunnel, or exclude the targets' addresses from it, and repeat.",
+        "hub_rejected": "The hub did not accept the result: %s %s",
+        "help_hub": "hub address (default %s)", "help_config": "path to the settings file", "help_once": "one measurement now, then exit",
+        "help_ref": "same as --role both",
+        "help_role": "node: check your own network (default); ref: anchor server only; both: both",
+        "banner": "udpcheck-node v%s. %s", "banner_ref": "Running as an anchor server.", "banner_node": "Turn off your VPN and bypass tools, otherwise you will check them instead of your provider.",
+        "no_task": "The hub gave no task, try again later.",
+        "running": "Running continuously. Callsign: %s. Role: %s. Stop: Ctrl+C.",
+        "role_node": "node", "role_ref": "anchor server", "role_both": "node and anchor server",
+        "ref_not_on": "Anchor role not enabled (%s).", "poll_err": "hub poll: %s %s",
+        "outdated": ("A new agent version %s is available (you have %s). Update: (curl -fsSL %s/en/i 2>/dev/null || wget -qO- %s/en/i) | sh. "
+                     "No hurry, the old version keeps working."),
+        "got_task": "[%H:%M:%S] task received", "stopped": "Stopped.", "hub_err": "Hub connection error (%s). Retrying in %d s.",
+    },
+}
+
+
+def tr(key):
+    return MSG[LANG_UI][key]
 
 
 def say(msg=""):
@@ -91,14 +184,18 @@ def http(hub, method, path, body=None, token=None, timeout=40):
             return e.code, {}
 
 
+def _why(r):
+    """Причина отказа от хаба на языке вывода (хаб присылает reason и reason_en)."""
+    return (r.get("reason_en") if LANG_UI == "en" else None) or r.get("reason")
+
+
 def register(hub, cfg, path):
     st, r = http(hub, "POST", "/api/v2/node/register", {"client": "udpcheck-node/%s %s" % (VERSION, platform.system())})
     if st != 201:
-        raise RuntimeError("регистрация отклонена: %s %s" % (st, r.get("error", "")))
+        raise RuntimeError(tr("reg_denied") % (st, r.get("error", "")))
     cfg.update({"hub": hub, "token": r["token"], "callsign": r["callsign"]})
     save_cfg(path, cfg)
-    say("Узел зарегистрирован. Позывной: %s. Провайдер по базе IP: %s" % (
-        r["callsign"], ("AS%s %s" % (r.get("asn"), r.get("org"))) if r.get("asn") else "не определён"))
+    say(tr("reg_ok") % (r["callsign"], ("AS%s %s" % (r.get("asn"), r.get("org"))) if r.get("asn") else tr("unknown")))
     return cfg
 
 
@@ -149,7 +246,7 @@ class RefServer:
 
     def start(self):
         if not self.bind():
-            say("Опорная роль не включена: порты UDP %s заняты другой программой." % ", ".join(map(str, REF_UDP_PORTS)))
+            say(tr("ref_ports_busy") % ", ".join(map(str, REF_UDP_PORTS)))
             return False
         for fn in (self._udp_loop, self._report_loop) + ((self._tcp_loop,) if self.tcp else ()):
             self.threading.Thread(target=fn, daemon=True).start()
@@ -166,28 +263,27 @@ class RefServer:
             if self.secret is None:
                 st, r = self._declare(False)
                 if st != 200 or not r.get("ok"):
-                    return self._state(False, r.get("reason") or r.get("error") or "хаб ответил %s" % st)
+                    return self._state(False, _why(r) or r.get("error") or tr("hub_said") % st)
                 self.secret, self.code = bytes.fromhex(r["secret"]), r["code"]
             st, r = self._declare(True)
             if st == 401:
-                return self._state(False, "хаб не узнал токен узла")
+                return self._state(False, tr("hub_no_token"))
             if st != 200 or not r.get("ok"):
-                return self._state(False, r.get("reason") or r.get("error") or "хаб ответил %s" % st)
+                return self._state(False, _why(r) or r.get("error") or tr("hub_said") % st)
             self.secret, self.code = bytes.fromhex(r["secret"]), r["code"]
             if r.get("verified"):
-                return self._state(True, "UDP %s, TCP %s" % (", ".join(map(str, r.get("udp_ports") or [])), r.get("tcp_port") or "нет"))
-            return self._state(False, r.get("reason") or "хаб не достучался до портов")
+                return self._state(True, "UDP %s, TCP %s" % (", ".join(map(str, r.get("udp_ports") or [])), r.get("tcp_port") or tr("none")))
+            return self._state(False, _why(r) or tr("hub_no_ports"))
         except Exception as e:
-            self._state(self.verified, "нет связи с хабом (%s)" % e.__class__.__name__, quiet=True)
+            self._state(self.verified, tr("hub_noconn") % e.__class__.__name__, quiet=True)
             return False
 
     def _state(self, ok, text, quiet=False):
         if ok != self.verified and not quiet:
             if ok:
-                say("Опорная роль включена: сервер отвечает на проверки по заданиям хаба (%s). Он виден на сайте в списке опорных серверов добровольцев." % text)
+                say(tr("ref_on") % text)
             else:
-                say("Опорная роль не активна: %s. Узел работает как обычно; проверка повторится сама. Чтобы стать опорным, откройте "
-                    "снаружи UDP %s и TCP %d (фаервол и NAT настраиваете вы)." % (text, ", ".join(map(str, sorted(self.socks))), REF_TCP_PORT))
+                say(tr("ref_off") % (text, ", ".join(map(str, sorted(self.socks))), REF_TCP_PORT))
         if not quiet or self.verified is None:
             self.verified = ok
         return bool(ok)
@@ -511,7 +607,7 @@ def tcp_probe(tg, down_kb=100, up_kb=200):
 def run_task(task):
     results = []
     for tg in task["targets"]:
-        say("  проверяю %s ..." % tg["code"])
+        say(tr("checking") % tg["code"])
         got, rtt_ms = udp_stream(tg, task["count"], task["size"], task["gap_ms"] / 1000.0, task["wait_s"])
         results.append({"code": tg["code"],
                         "ports": {str(p): {"back": len(got[p]), "ranges": _ranges(got[p])} for p in tg["ports"]},
@@ -519,29 +615,26 @@ def run_task(task):
     return results
 
 
-CLS = {"OK": "чисто", "INCUT": "ответы не приходят", "OUTCUT": "до цели не доходит", "LOSSY": "потери выше нормы", "NOREPORT": "цель не отчиталась"}
-ST = {"LOSSY": "проходит, но с потерями выше нормы", "OK": "чисто", "INCUT": "ответы не приходят", "OUTCUT": "до цели не доходит", "PART": "проходит только на части портов",
-      "MIXED": "смешанно", "NOREPORT": "цель не отчиталась"}
+CLS = {k: tr("cls_" + k) for k in ("OK", "INCUT", "OUTCUT", "LOSSY", "NOREPORT")}
+ST = {k: tr("st_" + k) for k in ("LOSSY", "OK", "INCUT", "OUTCUT", "PART", "MIXED", "NOREPORT")}
 
 
 def show(resp):
     say("")
     for t in resp["targets"]:
-        place = "в вашей стране" if t["kind"] in ("home", "ru") else "зарубеж"
+        place = tr("place_home") if t["kind"] in ("home", "ru") else tr("place_foreign")
         if t.get("community"):
-            say("--- опорный сервер участника %s [%s]: %s, TCP: %s (%s) ---" % (
-                t["name"], place, ST.get(t["status"], t["status"]), t["tcp"], "входит в итог как контроль" if t.get("control") else "в итог не входит"))
+            say(tr("comm_line") % (t["name"], place, ST.get(t["status"], t["status"]), t["tcp"], tr("comm_control") if t.get("control") else tr("comm_noverdict")))
         else:
-            say("--- %s [%s]: %s, TCP: %s ---" % (t["code"], place, ST.get(t["status"], t["status"]), t["tcp"]))
+            say(tr("target_line") % (t["code"], place, ST.get(t["status"], t["status"]), t["tcp"]))
         for p in t["ports"]:
-            say("  порт %-6s дошло на цель: %-4s ответов получено: %-4s %s" % (
-                p["port"], "?" if p["reached"] is None else p["reached"], p["back"], CLS.get(p["class"], p["class"])))
+            say(tr("port_line") % (p["port"], "?" if p["reached"] is None else p["reached"], p["back"], CLS.get(p["class"], p["class"])))
     say("")
-    say("ВЫВОД: " + resp["verdict"]["text"])
+    say(tr("verdict") + ((resp["verdict"].get("text_en") if LANG_UI == "en" else None) or resp["verdict"]["text"]))
     if resp.get("src_same") in ("different", "mixed"):
-        say("ВНИМАНИЕ: UDP вышел с другого адреса, чем HTTPS (VPN или обход на роутере). Результат искажён.")
+        say(tr("warn_src"))
     if resp["verdict"]["code"] == "TUNNEL":
-        say("Выключите прокси, VPN или туннель либо исключите из него адреса целей и повторите.")
+        say(tr("tunnel_hint"))
     say(resp.get("attribution", ""))
 
 
@@ -549,7 +642,7 @@ def do_round(hub, cfg, task):
     results = run_task(task)
     st, resp = http(hub, "POST", "/api/v2/node/result", {"task": task["task"], "results": results}, token=cfg["token"])
     if st != 200:
-        say("Хаб не принял результат: %s %s" % (st, resp.get("error", "")))
+        say(tr("hub_rejected") % (st, resp.get("error", "")))
         return None
     show(resp)
     return resp
@@ -561,19 +654,17 @@ def main():
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="udpcheck-node")
-    ap.add_argument("--hub", default=None, help="адрес хаба (по умолчанию %s)" % DEFAULT_HUB)
-    ap.add_argument("--config", default=None, help="путь к файлу настроек")
-    ap.add_argument("--once", action="store_true", help="один замер сейчас и выход")
-    ap.add_argument("--ref", action="store_true", help="то же, что --role both")
-    ap.add_argument("--role", choices=["node", "ref", "both"], default="node",
-                    help="node: проверять свою сеть (по умолчанию); ref: только опорный сервер; both: и то и другое")
+    ap.add_argument("--hub", default=None, help=tr("help_hub") % DEFAULT_HUB)
+    ap.add_argument("--config", default=None, help=tr("help_config"))
+    ap.add_argument("--once", action="store_true", help=tr("help_once"))
+    ap.add_argument("--ref", action="store_true", help=tr("help_ref"))
+    ap.add_argument("--role", choices=["node", "ref", "both"], default="node", help=tr("help_role"))
     args = ap.parse_args()
     role = "both" if (args.ref and args.role == "node") else args.role
     path = args.config or cfg_path()
     cfg = load_cfg(path)
     hub = (args.hub or cfg.get("hub") or DEFAULT_HUB).rstrip("/")
-    say("udpcheck-node v%s. %s" % (VERSION, "Работаю опорным сервером." if role == "ref" else
-                                   "Выключите VPN и обход блокировок, иначе вы проверите их, а не провайдера."))
+    say(tr("banner") % (VERSION, tr("banner_ref") if role == "ref" else tr("banner_node")))
     if not cfg.get("token") or cfg.get("hub") != hub:
         cfg = register(hub, {}, path)
     if args.once:
@@ -586,11 +677,10 @@ def main():
             if st == 200 and r.get("task"):
                 do_round(hub, cfg, r["task"])
                 return 0
-        say("Хаб не выдал задание, повторите позже.")
+        say(tr("no_task"))
         return 1
     backoff = 5
-    say("Работаю постоянно. Позывной: %s. Роль: %s. Остановить: Ctrl+C." % (
-        cfg.get("callsign", "?"), {"node": "узел", "ref": "опорный сервер", "both": "узел и опорный сервер"}[role]))
+    say(tr("running") % (cfg.get("callsign", "?"), tr("role_" + role)))
     ref = None
     last_notice = 0
     if role in ("ref", "both"):
@@ -599,7 +689,7 @@ def main():
             if not ref.start():
                 ref = None
         except Exception as e:
-            say("Опорная роль не включена (%s)." % e.__class__.__name__)
+            say(tr("ref_not_on") % e.__class__.__name__)
             ref = None
     while True:
         try:
@@ -610,23 +700,22 @@ def main():
                     ref.new_token(cfg["token"])
                 continue
             if st != 200:
-                raise RuntimeError("опрос хаба: %s %s" % (st, r.get("error", "")))
+                raise RuntimeError(tr("poll_err") % (st, r.get("error", "")))
             ag = r.get("agent") or {}
             if ag.get("outdated") and time.time() - last_notice > 12 * 3600:
                 last_notice = time.time()
-                say("Доступна новая версия агента %s (у вас %s). Обновить: (curl -fsSL %s/i 2>/dev/null || wget -qO- %s/i) | sh. "
-                    "Срочности нет, старая версия продолжит работать." % (ag.get("latest"), VERSION, hub, hub))
+                say(tr("outdated") % (ag.get("latest"), VERSION, hub, hub))
             if ref:
                 ref.maybe_handshake(r.get("ref_verified"))
             if r.get("task") and role != "ref":
-                say(time.strftime("[%H:%M:%S] получено задание"))
+                say(time.strftime(tr("got_task")))
                 do_round(hub, cfg, r["task"])
             backoff = 5
         except KeyboardInterrupt:
-            say("Остановлено.")
+            say(tr("stopped"))
             return 0
         except Exception as e:
-            say("Ошибка связи с хабом (%s). Повтор через %d с." % (e.__class__.__name__, backoff))
+            say(tr("hub_err") % (e.__class__.__name__, backoff))
             time.sleep(backoff)
             backoff = min(backoff * 2, 600)
 

@@ -1,48 +1,43 @@
 # UDPcheck
 
-Сервис, который показывает, режет ли ваш интернет-провайдер входящий UDP из-за рубежа, в какую сторону, и даёт доказательства для техподдержки.
-Рабочая версия: https://dagart.xyz
+UDPcheck shows whether your ISP drops inbound UDP from abroad, in which direction (your packets going out, or the replies coming back), and gives you evidence to show to your ISP's support.
+Running instance: https://dagart.xyz/en/ (English) and https://dagart.xyz (Russian). [Русская версия](README.ru.md)
 
-> **In short (English):** UDPcheck tells you whether your ISP drops inbound foreign UDP, in which direction (your packets out, or replies back),
-> and produces evidence you can show to support. It consists of a hub, anchor servers, an optional node agent and a browser check (WebRTC/STUN).
-> Pure Python standard library, no logs of visitor IPs, AGPL-3.0-or-later. Running instance: https://dagart.xyz. Docs are mostly in Russian;
-> see [PROTOCOL.md](PROTOCOL.md) and [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
+## How it works
 
-## Как это устроено
+- **Hub** (`udpcheck_v2.py`, hub role): receives checks, keeps them in SQLite, serves the site, the provider list, the journal and the API.
+- **Anchor servers** (same code, target role): answer the browser's UDP requests (STUN) and the nodes' signed UDP echo, and trace the route to a visitor when the hub asks.
+  They are needed in the visitor's country (control) and abroad.
+- **Nodes** (`udpcheck_node.py`): an agent for home computers, routers and VPS. Every few minutes it sends a UDP stream to the anchor servers and reports the outcome to the hub.
+  The "volunteer anchor server" role (`--role ref`) answers other people's checks.
+- **Site** (`siteparts/index.tpl.html` plus the texts in `siteparts/strings.py`; `python build_site.py` builds `site/` in Russian and `site/en/` in English):
+  a browser check over WebRTC, a provider list with search, a journal and a ready-made text for your ISP's support.
 
-- **Хаб** (`udpcheck_v2.py`, роль «хаб»): принимает проверки, хранит их в SQLite, отдаёт страницу, список провайдеров, журнал и API.
-- **Опорные серверы** (тот же код, роль «цель»): отвечают на UDP-запросы браузера (STUN) и подписанное UDP-эхо узлов, по заданию хаба
-  делают трассировку до посетителя. Нужны в стране посетителя (контроль) и за рубежом.
-- **Узлы** (`udpcheck_node.py`): агент для домашних компьютеров, роутеров и VPS. Раз в несколько минут шлёт UDP-поток на опорные серверы и
-  присылает хабу итог. Роль «опорный сервер участника» (`--role ref`) отвечает чужим проверкам.
-- **Страница** (`site/index.html`): браузерная проверка через WebRTC, список провайдеров с поиском, журнал, текст обращения в техподдержку.
+Details: [PROTOCOL.md](PROTOCOL.md). One-line node install: `curl -fsSL https://dagart.xyz/install-node.sh | sudo sh`.
 
-Подробно: [PROTOCOL.md](PROTOCOL.md). Установка узла одной командой: `curl -fsSL https://dagart.xyz/install-node.sh | sudo sh`.
+## Principles
 
-## Принципы
+- Python 3.10+ standard library only, one file per role, no dependencies.
+- The server writes no logs. Visitors' IP addresses live in memory and are erased on a timer; the database keeps only the network (ASN), the result and a random browser number as a hash.
+- Long replies and traceroutes go only to the address of a visitor whom the hub has confirmed over TCP (protection against traffic amplification).
+- Individuals registered as network owners are never named publicly.
 
-- Только стандартная библиотека Python 3.10+, один файл на роль, без зависимостей.
-- Сервер ничего не пишет в журналы. IP-адреса посетителей хранятся в памяти и стираются по таймеру; в базе остаются только сеть (ASN),
-  результат и случайный номер браузера в виде хэша.
-- Длинные ответы и трассировка отправляются только на адрес посетителя, которого хаб подтвердил по TCP (защита от усиления трафика).
-- Частных лиц, записанных владельцами сетей, публично не называем.
+## Directories
 
-## Каталоги
-
-| Путь | Что там |
+| Path | What is there |
 |---|---|
-| `udpcheck_server.py` | сервер: STUN, UDP-эхо, трассировка, GeoIP |
-| `udpcheck_v2.py` | хаб и роль цели |
-| `udpcheck_node.py` | агент узла |
-| `installer/`, `build_site.py` | установщик агента и сборка `site/` |
-| `site/` | страница, скрипт диагностики, документация протокола |
-| `ops/` | скрипты для сервера: резервные копии, обновление баз GeoIP, оповещения |
-| `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | лицензия, сторонние данные, принципы приватности, уязвимости, как помочь |
-| `docs/SELF-HOSTING.md` | как запустить свой хаб, опорные серверы и узлы |
-| `tests/` | тесты (запуск: `python tests/test_v2_local.py` и остальные `test_*.py`) |
-| `add_target.py`, `add_logo.py` | подключение опорного сервера, логотип провайдера |
+| `udpcheck_server.py` | server: STUN, UDP echo, traceroute, GeoIP |
+| `udpcheck_v2.py` | hub and the target role |
+| `udpcheck_node.py` | node agent |
+| `installer/`, `build_site.py`, `siteparts/` | agent installer, building `site/` (page template and texts in two languages) |
+| `site/` | built pages (`/`, `/en/`), diagnostics script, protocol documentation |
+| `ops/` | server-side scripts: backups, GeoIP updates, watcher and alerts, hardening, tarpit for robots |
+| `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | licence, third-party data, privacy principles, vulnerabilities, how to help |
+| `docs/SELF-HOSTING.md` | how to run your own hub, anchor servers and nodes |
+| `tests/` | tests |
+| `add_target.py`, `add_logo.py` | connecting an anchor server, a provider logo |
 
-## Запуск тестов
+## Running the tests
 
 ```
 python tests/test_v2_local.py
@@ -51,25 +46,32 @@ python tests/test_pad_local.py
 python tests/test_watch_local.py
 python tests/names_selftest.py
 python tests/test_s3_local.py
+python tests/fuzz_local.py
+python tests/test_tarpit_local.py
+sh tests/i18n/run.sh          # the interface in Russian and English (needs Docker)
 ```
 
-Нужны Python 3.10+ и (для части тестов) `traceroute`; на Windows используется заглушка из `tests/`.
-Для проверки в реальных браузерах: `tests/browsers_docker.py` (Playwright в Docker).
+You need Python 3.10+ and (for some tests) `traceroute`; on Windows a stub from `tests/` is used.
+For real browsers: `tests/browsers_docker.py` (Playwright in Docker).
 
-## Данные и лицензии
+## Translating the site
 
-- Геолокация IP: DB-IP.com (CC BY 4.0). Названия городов: GeoNames (CC BY 4.0).
-- Логотипы провайдеров принадлежат их владельцам и показываются только как опознавательный знак сети.
+All interface texts are in `siteparts/strings.py` (the Russian text is checked against the reference `tests/i18n/golden_ru.json`).
+To add a language, add its dictionaries there, a page in `siteparts/pages.py` and the `/<lang>/` routes in `Caddyfile.dagart`.
 
-## Связь
+## Data and licences
+
+- IP geolocation: DB-IP.com (CC BY 4.0). City names: GeoNames (CC BY 4.0). Network names and types: RIPEstat and PeeringDB.
+- Provider logos belong to their owners and are shown only as an identifying mark of the network.
+
+## Contact
 
 draldrean@protonmail.com
 
-## Лицензия, имя и домен
+## Licence, name and domain
 
-Код распространяется на условиях **GNU AGPL-3.0-or-later** (файл [LICENSE](LICENSE)). Дорабатывайте и запускайте свои копии; если вы запускаете
-изменённую версию как сервис для других людей, они вправе получить её исходный код (так посетитель может проверить, что копия не отправляет
-его данные дальше сайта). Подробнее о том, что и как мы берём у посетителей: [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
+The code is distributed under the **GNU AGPL-3.0-or-later** ([LICENSE](LICENSE)). Improve it and run your own copies; if you run a modified version as a service for other people, they are entitled to its source code
+(so a visitor can check that the copy does not send their data further than the site). More about what we take from visitors and how: [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
 
-Название «UDPcheck» и домен dagart.xyz относятся к официальному экземпляру: копиям и изменённым версиям просим давать другое имя
-(см. [NOTICE](NOTICE)). Как помочь: [CONTRIBUTING.md](CONTRIBUTING.md), правила общения: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Свой хаб: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). Об уязвимостях: [SECURITY.md](SECURITY.md).
+The name "UDPcheck" and the domain dagart.xyz belong to the official instance: please give copies and modified versions another name (see [NOTICE](NOTICE)).
+How to help: [CONTRIBUTING.md](CONTRIBUTING.md), conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Your own hub: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). Vulnerabilities: [SECURITY.md](SECURITY.md).

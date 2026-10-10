@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Политика обработки данных | UDPcheck</title>
+<link rel="canonical" href="https://dagart.xyz/privacy">
+<link rel="alternate" hreflang="ru" href="https://dagart.xyz/privacy">
+<link rel="alternate" hreflang="en" href="https://dagart.xyz/en/privacy">
+<link rel="alternate" hreflang="x-default" href="https://dagart.xyz/privacy">
 <meta name="description" content="Какие данные обрабатывает UDPcheck, зачем и как долго.">
 <style>
 :root{--bg:#f4f6fa;--surface:#fff;--text:#111827;--muted:#5b6578;--line:#d9dfeb;--accent:#0b5fff}
@@ -19,14 +23,16 @@ table{border-collapse:collapse;width:100%;font-size:15px}
 th,td{border-top:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
 th{font-size:13px;color:var(--muted);font-weight:600;border-top:0}
 li{margin:4px 0}
+.top{display:flex;justify-content:space-between;align-items:center}
 .top a{text-decoration:none;font-weight:700}
+.top .lang a{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;line-height:20px}
 </style>
 </head>
 <body>
 <main>
-<div class="top"><a href="/">← UDPcheck</a></div>
+<div class="top"><a href="/">← UDPcheck</a><span class="lang"><a href="/en/privacy" hreflang="en" lang="en" title="English version">EN</a></span></div>
 <h1>Политика обработки данных</h1>
-<div class="muted">Редакция от 08.10.2026. Сайт dagart.xyz, исходный код: <a href="https://github.com/Dagart-xyz/udpcheck">github.com/Dagart-xyz/udpcheck</a> (AGPL-3.0).</div>
+<div class="muted">Редакция от 10.10.2026. Сайт dagart.xyz, исходный код: <a href="https://github.com/Dagart-xyz/udpcheck">github.com/Dagart-xyz/udpcheck</a> (AGPL-3.0).</div>
 
 <h2>1. Кто мы</h2>
 <div class="card"><p>Оператор сервиса: владелец проекта UDPcheck («мы»). Связь по любым вопросам о данных:
@@ -48,7 +54,7 @@ li{margin:4px 0}
 <tr><td><b>Случайный номер браузера</b></td><td>лимиты частоты, чтобы один браузер не учитывался в статистике чаще раза в час</td>
 <td>создаётся страницей и хранится у вас в браузере (localStorage, ключ <code>udpc_cid</code>); в базе только его хэш (SHA-256, 16 символов), 60 суток. Не связан с вами и не собирает данные об устройстве</td></tr>
 <tr><td><b>Промежуточные узлы маршрута</b></td><td>показать вам маршрут и места обрыва</td><td>адреса узлов только в памяти и в вашей странице; в базу попадают лишь номера сетей по пути</td></tr>
-<tr><td><b>Данные вашего браузера</b></td><td>показать последний маршрут без повторного запроса</td><td>localStorage (<code>udpc_trace</code>, до 6 часов) и отметка закрытой плашки; очищается вместе с данными сайта</td></tr>
+<tr><td><b>Данные вашего браузера</b></td><td>показать последний маршрут без повторного запроса</td><td>localStorage (<code>udpc_trace</code>, до 6 часов), отметка закрытой плашки (<code>udpc_notice</code>) и выбранный язык (<code>udpc_lang</code>); очищается вместе с данными сайта</td></tr>
 <tr><td><b>Узлы и серверы добровольцев</b> (если вы их ставите)</td><td>работа сети проверок</td><td>позывной, сеть, страна, примерный город, тип системы, хэш ключа; для сервера добровольца ещё его IP (публично не показывается), пока он участвует</td></tr>
 </table>
 <p class="muted">Резервные копии базы шифруются и хранятся до 14 суток; в них тот же набор, что в самой базе: IP посетителей там нет, IP серверов добровольцев есть.</p>

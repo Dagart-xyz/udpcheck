@@ -20,7 +20,7 @@ set -eu
 HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
 ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (проверяет свою сеть) | ref (опорный сервер) | both
 if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # старая переменная: REF=0 означало «только узел»
-AGENT_SHA256="0924a171253cc4fdf15f7a4bc23faedb04ff20a5fad75494b5a5ad46b988f07e"
+AGENT_SHA256="a3192fea3a83c971f370a0c7d448f5d41b78da88ac18952a96452db1d5613f30"
 DIR=/opt/udpcheck-node
 STATE=/var/lib/udpcheck-node
 SVC=udpcheck-node
@@ -271,6 +271,7 @@ start_service() {
 	procd_open_instance
 	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --config /etc/udpcheck-node/config.json
 	procd_set_param user nobody
+	procd_set_param env UDPCHECK_LANG=ru
 	procd_set_param no_new_privs 1
 	procd_set_param respawn 3600 20 0
 	procd_set_param stdout 1
@@ -408,6 +409,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --config /var/lib/udpcheck-node/config.json
+Environment=UDPCHECK_LANG=ru
 # Временный пользователь без прав; состояние (токен узла) только в /var/lib/udpcheck-node.
 DynamicUser=yes
 StateDirectory=udpcheck-node

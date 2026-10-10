@@ -29,6 +29,7 @@ tmp = tempfile.mkdtemp()
 S.GEO_DIR = tmp
 import shutil
 shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ops", "brands.json"), os.path.join(tmp, "brands.json"))
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ops", "names_en.json"), os.path.join(tmp, "names_en.json"))
 json.dump({"196949": "Частный провайдер AS196949"}, open(os.path.join(tmp, "names.json"), "w", encoding="utf-8"), ensure_ascii=False)
 
 cn = V.clean_name
@@ -95,6 +96,7 @@ check("организация человека публично не показ�
 check("название из names.json приоритетнее (бренд, владелец физлицо)", V.provider_name(219095, "Paul Sagov") == "Astra VPS")
 check("обычная организация показывается", V.public_org(8075, "Microsoft Corporation") == "Microsoft Corporation")
 check("в разборе: сокращения (OBIT, НИИСИ РАН) не тревожат", not V._name_flags("OBIT") and not V._name_flags("НИИСИ РАН"))
+check("в разборе: русское название без английского помечается, со словарным нет", any("английского" in x for x in V._name_flags("Новый Оператор")) and not any("английского" in x for x in V._name_flags("Ростелеком")))
 check("в разборе: «(^ ^)» и «==Vodocomfort==» помечаются", bool(V._name_flags("(^ ^)")) and bool(V._name_flags("==Vodocomfort==")))
 check("в разборе: имя человека в организации помечается", any("человека" in f for f in V._name_flags("Astra VPS", 204161)))
 check("в базу вместо имени человека кладётся «Частное лицо»", V._store_org("Alexey Geiner") == "Частное лицо" and V._store_org("Microsoft Corporation") == "Microsoft Corporation" and V._store_org(None) is None)
@@ -104,6 +106,12 @@ n0 = threading.active_count()
 for i in range(500):
     V._enqueue_fetch(lambda a: None, i)
 check("фоновые запросы названий идут одним потоком (500 заданий: не больше одного нового потока)", threading.active_count() - n0 <= 1, threading.active_count() - n0)
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ops", "names_en.json"), os.path.join(tmp, "names_en.json"))
+V._names_en["mtime"] = 0
+print("[английские названия]")
+for ru, en in (("Ростелеком", "Rostelecom"), ("МегаФон", "MegaFon"), ("Билайн (ВымпелКом)", "Beeline (VimpelCom)"), ("Частный провайдер AS196949", "Private provider AS196949"),
+               ("Seven Sky", "Seven Sky"), ("Новый Оператор", "Novyy Operator"), ("Москва", "Moskva"), ("Щёлково", "Shchelkovo")):
+    check("название по-английски: %s -> %s" % (ru, en), V.en_name(ru) == en, V.en_name(ru))
 
 print()
 print("ИТОГ: всё прошло" if not FAILS else "ИТОГ: ПРОВАЛЕНО %d" % len(FAILS))

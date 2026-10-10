@@ -27,6 +27,33 @@
 	}
 }
 
+# Страницы сайта (общий блок: основной адрес и внутренний адрес для замедлителя роботов)
+(site_static) {
+	root * /var/www/udpcheck-site
+	header {
+		# страницу браузер каждый раз сверяет с сервером (иначе у посетителей остаётся старая версия); картинки кэшируются ниже
+		Cache-Control no-cache
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+	}
+	rewrite /i /install-node.sh
+	rewrite /en/i /install-node.en.sh
+	# английская версия: /en/ (главная), /en/as29124 (страница провайдера), /en/privacy, /en/terms
+	@en path /en /en/*
+	header @en Content-Language en
+	# страницы документов без расширения
+	@docs path /privacy /terms /en/privacy /en/terms
+	rewrite @docs {path}.html
+	# страницы провайдеров /as29124 и /en/as29124: та же страница, дальше работает JS. Пока в индекс поисковиков они не идут (заголовок), обходить их можно
+	@prov path_regexp prov ^/(en/)?as[0-9]{1,10}/?$
+	header @prov X-Robots-Tag "noindex"
+	rewrite @prov /{re.prov.1}index.html
+	@sh path /install-node.sh /install-node.en.sh /i /en/i
+	header @sh Content-Type "text/plain; charset=utf-8"
+	@static path /logos/*
+	header @static Cache-Control "public, max-age=86400"
+	file_server
+}
+
 dagart.xyz {
 	# Сжатие страниц и JSON (страница 97 КБ, список провайдеров 62 КБ) и защитные заголовки для всех ответов, включая API
 	encode zstd gzip
@@ -39,6 +66,10 @@ dagart.xyz {
 		-Server
 	}
 
+	# Поисковикам: API и служебные файлы не индексировать (страницы провайдеров закрыты ниже, главная и документы открыты)
+	@noindex path /api/* /udpcheck/* /install-node.sh /install-node.en.sh /i /en/i /node/* /protocol.txt
+	header @noindex X-Robots-Tag "noindex, nofollow"
+
 	# Хаб: API проекта (старый префикс /udpcheck оставлен для уже установленных узлов и целей)
 	handle /udpcheck/* {
 		import hub
@@ -47,28 +78,50 @@ dagart.xyz {
 		import hub
 	}
 
-	# Проект: лендинг и кнопка проверки в корне сайта
-	handle {
-		root * /var/www/udpcheck-site
-		header {
-			# страницу браузер каждый раз сверяет с сервером (иначе у посетителей остаётся старая версия); картинки кэшируются ниже
-			Cache-Control no-cache
-			Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
-		}
-		rewrite /i /install-node.sh
-		# страницы документов без расширения
-		@docs path /privacy /terms
-		rewrite @docs {path}.html
-		# страницы провайдеров /as29124: та же страница, дальше работает JS
-		@prov path_regexp ^/as[0-9]{1,10}/?$
-		rewrite @prov /index.html
-		@sh path /install-node.sh /i
-		header @sh Content-Type "text/plain; charset=utf-8"
-		@static path /logos/*
-		header @static Cache-Control "public, max-age=86400"
-		file_server
+	# Роботы без признаков браузера (нет Accept-Language и Sec-Fetch-Mode, не поисковик и не превью ссылки, не служебный адрес) получают ту же страницу, но
+	# не сразу: их ведёт udpcheck-tarpit (ops/udpcheck-tarpit.py), который берёт страницу у внутреннего адреса ниже. Не блокировка: страница приходит, с задержкой.
+	@robotish {
+		not header Accept-Language *
+		not header Sec-Fetch-Mode *
+		not header User-Agent *bot*
+		not header User-Agent *Bot*
+		not header User-Agent *Google*
+		not header User-Agent *Yandex*
+		not header User-Agent *Bing*
+		not header User-Agent *DuckDuck*
+		not header User-Agent *facebookexternalhit*
+		not header User-Agent *WhatsApp*
+		not header User-Agent *vkShare*
+		not header User-Agent *Mail.RU*
+		not header User-Agent *Slack*
+		not header User-Agent *Discord*
+		not header User-Agent *Twitter*
+		not header User-Agent *Preview*
+		not header User-Agent *Skype*
+		not header User-Agent *Viber*
+		not header User-Agent *Embedly*
+		not header User-Agent *Pinterest*
+		not header User-Agent *LinkedIn*
+		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/*
+	}
+	handle @robotish {
+		reverse_proxy 127.0.0.1:18081
 	}
 
+	# Проект: лендинг и кнопка проверки в корне сайта
+	handle {
+		import site_static
+	}
+
+	log {
+		output discard
+	}
+}
+
+# Внутренний адрес сайта для замедлителя роботов: слушает только локальный интерфейс, любой Host (замедлитель передаёт исходный)
+http://:18082 {
+	bind 127.0.0.1
+	import site_static
 	log {
 		output discard
 	}

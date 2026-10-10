@@ -137,40 +137,82 @@ def is_tunnel(tcp_ms, rtt_ms):
 NO_ANCHOR_TEXT = ("В вашей стране нашему сервису пока не на что опираться: нет опорного сервера, с которым можно сравнить. "
                   "Вы можете помочь, добавив сервер из вашей страны: https://dagart.xyz/#help-anchor")
 
+# Тексты итога замера (код -> шаблон) на двух языках. Русские тексты проверяются тестами, менять их можно только осознанно.
+VERDICT_TEXT = {
+    "ru": {
+        "NO_ANCHOR": NO_ANCHOR_TEXT,
+        "CONTROL_DOWN": "Контрольная точка в вашей стране не дала результата: сравнивать не с чем. Повторите проверку.",
+        "CONTROL_BAD": ("UDP до контрольной точки в вашей стране не проходит чисто (статус %(status)s): проблема на линии или на ПК, "
+                        "выводы по зарубежным серверам ненадёжны."),
+        "NO_FOREIGN": "Зарубежные серверы не дали результата, сравнить UDP нельзя.",
+        "NO_BLOCK": "UDP проходит и внутри страны, и до всех зарубежных серверов: блокировки не обнаружено.%(extra)s",
+        "LOSSY_EXTRA": " До %(names)s заметные потери пакетов (случайные потери, не блокировка).",
+        "PART_EXTRA": " На части портов у %(names)s ответы изредка проходят: фильтр выборочный.",
+        "FOREIGN_IN_CUT": ("UDP до точки в вашей стране проходит чисто, а из-за рубежа (%(names)s) ответы не приходят: пакеты узел -> сервер "
+                           "доходят, обратно нет. Режется ВХОДЯЩИЙ UDP из-за рубежа.%(extra)s Контроль в вашей стране в этот же момент чистый, "
+                           "поэтому на общую аварию канала это не похоже."),
+        "FOREIGN_OUT_CUT": "UDP внутри страны проходит, а до зарубежных серверов (%(names)s) пакеты не доходят: режется ИСХОДЯЩИЙ UDP за рубеж.",
+        "FOREIGN_PARTIAL": "Избирательно: внутри страны UDP проходит; чисто до %(ok)s; режется или теряется до %(bad)s.",
+        "NOBODY": "никого",
+        "TUNNEL": ("На пути узла стоит прозрачный прокси или туннель: TCP-соединение с %(names)s завершается быстрее, чем идёт UDP-эхо, то есть "
+                   "рукопожатие делает не цель, а что-то рядом с вами. Замер отражает этот прокси, а не провайдера, "
+                   "и в статистику не попадает."),
+    },
+    "en": {
+        "NO_ANCHOR": ("There is nothing to compare with in your country yet: the project has no anchor server here. "
+                      "You can help by adding a server from your country: https://dagart.xyz/en/#help-anchor"),
+        "CONTROL_DOWN": "The control point in your country gave no result, so there is nothing to compare with. Repeat the check.",
+        "CONTROL_BAD": ("UDP to the control point in your country does not pass cleanly (status %(status)s): the problem is on the line or on your PC, "
+                        "so conclusions about foreign servers are unreliable."),
+        "NO_FOREIGN": "Foreign servers gave no result, so UDP cannot be compared.",
+        "NO_BLOCK": "UDP passes both inside the country and to all foreign servers: no blocking detected.%(extra)s",
+        "LOSSY_EXTRA": " Noticeable packet loss towards %(names)s (random loss, not blocking).",
+        "PART_EXTRA": " On some ports of %(names)s replies occasionally get through: the filter is selective.",
+        "FOREIGN_IN_CUT": ("UDP to the point in your country passes cleanly, but from abroad (%(names)s) replies do not arrive: packets node -> server "
+                           "arrive, but not back. INBOUND UDP from abroad is being blocked.%(extra)s The control in your country is clean at the same moment, "
+                           "so this does not look like a general channel outage."),
+        "FOREIGN_OUT_CUT": "UDP inside the country passes, but packets to foreign servers (%(names)s) do not arrive: OUTBOUND UDP abroad is being blocked.",
+        "FOREIGN_PARTIAL": "Selective: UDP inside the country passes; clean to %(ok)s; blocked or lost towards %(bad)s.",
+        "NOBODY": "nobody",
+        "TUNNEL": ("A transparent proxy or tunnel is on the node's path: the TCP connection to %(names)s completes faster than the UDP echo, which means the "
+                   "handshake is made not by the target but by something near you. The measurement reflects that proxy, not the provider, "
+                   "and is not counted in the statistics."),
+    },
+}
 
-def make_verdict(results):
-    """results: [{code, kind('home'|'foreign'), status}] -> (код, текст по-русски). home: сервер в той же стране, что и проверяемый."""
+
+def verdict_texts(code, lang, **kw):
+    t = VERDICT_TEXT.get(lang) or VERDICT_TEXT["ru"]
+    return t[code] % kw if kw else t[code]
+
+
+def make_verdict(results, lang="ru"):
+    """results: [{code, kind('home'|'foreign'), status}] -> (код, текст на языке lang: ru или en). home: сервер в той же стране, что и проверяемый."""
+    vt = lambda code, **kw: verdict_texts(code, lang, **kw)
     skip = ("NOREPORT", "NOHTTPS")
     if not any(_is_home(r["kind"]) for r in results):
-        return "NO_ANCHOR", NO_ANCHOR_TEXT
+        return "NO_ANCHOR", vt("NO_ANCHOR")
     rus = [r for r in results if _is_home(r["kind"]) and r["status"] not in skip]
     foreign = [r for r in results if not _is_home(r["kind"]) and r["status"] not in skip]
     if not rus:
-        return "CONTROL_DOWN", "Контрольная точка в вашей стране не дала результата: сравнивать не с чем. Повторите проверку."
+        return "CONTROL_DOWN", vt("CONTROL_DOWN")
     if not any(r["status"] in ("OK", "LOSSY") for r in rus):      # контролей в стране может быть несколько: достаточно одного чистого
-        return "CONTROL_BAD", ("UDP до контрольной точки в вашей стране не проходит чисто (статус %s): проблема на линии или на ПК, "
-                               "выводы по зарубежным серверам ненадёжны." % rus[0]["status"])
+        return "CONTROL_BAD", vt("CONTROL_BAD", status=rus[0]["status"])
     if not foreign:
-        return "NO_FOREIGN", "Зарубежные серверы не дали результата, сравнить UDP нельзя."
+        return "NO_FOREIGN", vt("NO_FOREIGN")
     names = lambda lst: ", ".join(r["code"] for r in lst)
     ok = [r for r in foreign if r["status"] in ("OK", "LOSSY")]      # LOSSY: проходит, но с потерями выше нормы
     lossy = [r for r in foreign if r["status"] == "LOSSY"]
     inn = [r for r in foreign if r["status"] in ("INCUT", "PART")]
     out = [r for r in foreign if r["status"] == "OUTCUT"]
     if len(ok) == len(foreign):
-        extra = (" До %s заметные потери пакетов (случайные потери, не блокировка)." % names(lossy)) if lossy else ""
-        return "NO_BLOCK", "UDP проходит и внутри страны, и до всех зарубежных серверов: блокировки не обнаружено." + extra
+        return "NO_BLOCK", vt("NO_BLOCK", extra=vt("LOSSY_EXTRA", names=names(lossy)) if lossy else "")
     if not ok and inn and not out:
         part = [r for r in foreign if r["status"] == "PART"]
-        extra = (" На части портов у %s ответы изредка проходят: фильтр выборочный." % names(part)) if part else ""
-        return "FOREIGN_IN_CUT", ("UDP до точки в вашей стране проходит чисто, а из-за рубежа (%s) ответы не приходят: пакеты узел -> сервер "
-                                  "доходят, обратно нет. Режется ВХОДЯЩИЙ UDP из-за рубежа.%s Контроль в вашей стране в этот же момент чистый, "
-                                  "поэтому на общую аварию канала это не похоже." % (names(inn), extra))
+        return "FOREIGN_IN_CUT", vt("FOREIGN_IN_CUT", names=names(inn), extra=vt("PART_EXTRA", names=names(part)) if part else "")
     if not ok and out:
-        return "FOREIGN_OUT_CUT", ("UDP внутри страны проходит, а до зарубежных серверов (%s) пакеты не доходят: режется ИСХОДЯЩИЙ UDP за рубеж."
-                                   % names(out))
-    return "FOREIGN_PARTIAL", ("Избирательно: внутри страны UDP проходит; чисто до %s; режется или теряется до %s."
-                               % (names(ok) or "никого", names([r for r in foreign if r["status"] != "OK"])))
+        return "FOREIGN_OUT_CUT", vt("FOREIGN_OUT_CUT", names=names(out))
+    return "FOREIGN_PARTIAL", vt("FOREIGN_PARTIAL", ok=names(ok) or vt("NOBODY"), bad=names([r for r in foreign if r["status"] != "OK"]))
 
 
 # ================================================================ роль цели
@@ -500,7 +542,7 @@ def load_targets(force=False):
         raw = json.load(fh)
     out = []
     for t in raw:
-        out.append({"code": t["code"], "name": t.get("name", t["code"]), "country": _target_country(t),
+        out.append({"code": t["code"], "name": t.get("name", t["code"]), "name_en": t.get("name_en") or translit(t.get("name", t["code"])), "country": _target_country(t),
                     "ip": t["ip"], "ports": [int(p) for p in t["ports"]], "secret": bytes.fromhex(t["secret"]),
                     "tcp_port": int(t.get("tcp_port", 0) or 0)})
     TARGETS = out
@@ -876,18 +918,18 @@ def node_ref(h, ip, body):
     except (ValueError, TypeError, AttributeError):
         return h.err(400, "некорректный запрос")
     if ":" in ip:
-        return h.send_json(200, {"ok": False, "reason": "узел вышел к хабу по IPv6, а опорный сервер работает только по IPv4"})
+        return h.send_json(200, {"ok": False, **_reason("узел вышел к хабу по IPv6, а опорный сервер работает только по IPv4")})
     if not (S.is_public(ip) or S.ALLOW_NON_GLOBAL):
-        return h.send_json(200, {"ok": False, "reason": "у узла не публичный адрес"})
+        return h.send_json(200, {"ok": False, **_reason("у узла не публичный адрес")})
     now = int(time.time())
     # устаревшие записи с тем же адресом (узел переустановили) убираем; один адрес держит один опорный сервер
     db_exec("DELETE FROM refs WHERE ip = ? AND node_id != ? AND node_id IN (SELECT id FROM nodes WHERE last_seen < ?)",
             (ip, nid, now - 3600))
     if db_exec("SELECT 1 FROM refs WHERE ip = ? AND node_id != ?", (ip, nid), one=True):
-        return h.send_json(200, {"ok": False, "reason": "с этого адреса опорный сервер уже работает"})
+        return h.send_json(200, {"ok": False, **_reason("с этого адреса опорный сервер уже работает")})
     cur = db_exec("SELECT id, secret, ip, udp_ports, tcp_port, verified FROM refs WHERE node_id = ?", (nid,), one=True)
     if cur is None and db_exec("SELECT COUNT(*) FROM refs", one=True)[0] >= MAX_REFS:
-        return h.send_json(200, {"ok": False, "reason": "достигнут предел числа опорных серверов"})
+        return h.send_json(200, {"ok": False, **_reason("достигнут предел числа опорных серверов")})
     asn, _org, country, _city = _geo_of(ip)
     kind = country or "?"      # колонка kind в refs осталась от прежней версии: храним страну
     ports_json = json.dumps(ports)
@@ -914,7 +956,20 @@ def node_ref(h, ip, body):
             verified = False
             reason = "хаб не получил ответ ни на одном из портов: они закрыты фаерволом или NAT"
     return h.send_json(200, {"ok": True, "code": "REF-%d" % rid, "secret": secret, "verified": verified, "kind": kind,
-                             "udp_ports": ports, "tcp_port": tcp_port, "reason": reason})
+                             "udp_ports": ports, "tcp_port": tcp_port, **(_reason(reason) if reason else {"reason": None, "reason_en": None})})
+
+
+REASON_EN = {
+    "узел вышел к хабу по IPv6, а опорный сервер работает только по IPv4": "the node reached the hub over IPv6, while the anchor server works over IPv4 only",
+    "у узла не публичный адрес": "the node has no public address",
+    "с этого адреса опорный сервер уже работает": "an anchor server is already running from this address",
+    "достигнут предел числа опорных серверов": "the limit of anchor servers has been reached",
+    "хаб не получил ответ ни на одном из портов: они закрыты фаерволом или NAT": "the hub got no reply on any of the ports: they are closed by a firewall or NAT",
+}
+
+
+def _reason(ru):
+    return {"reason": ru, "reason_en": REASON_EN.get(ru, ru)}
 
 
 def node_poll(h, ip, body=b""):
@@ -1099,11 +1154,11 @@ def node_result(h, ip, body):
                             "community": comm, "control": bool(cfg.get("control"))})
     if tainted:
         vcode = "TUNNEL"
-        vtext = ("На пути узла стоит прозрачный прокси или туннель: TCP-соединение с %s завершается быстрее, чем идёт UDP-эхо, то есть "
-                 "рукопожатие делает не цель, а что-то рядом с вами. Замер отражает этот прокси, а не провайдера, "
-                 "и в статистику не попадает." % ", ".join(tainted))
+        vtext = verdict_texts("TUNNEL", "ru", names=", ".join(tainted))
+        vtext_en = verdict_texts("TUNNEL", "en", names=", ".join(tainted))
     else:
         vcode, vtext = make_verdict(verdict_in)
+        vtext_en = make_verdict(verdict_in, "en")[1]
     rid = db_exec("INSERT INTO rounds(ts, node_id, asn, verdict, src_same) VALUES(?,?,?,?,?)", (now, row[0], asn, vcode, same))
     with DBL:
         for c, p, snt, rch, bk, cls in ([] if tainted else rows):
@@ -1123,7 +1178,7 @@ def node_result(h, ip, body):
             g = S.GEO.lookup(task["ip"]) or {}
             WTRACES[secrets.token_hex(8)] = {"ip": task["ip"], "asn": g.get("asn"), "org": _store_org(g.get("org")), "src": "node",
                                              "country": _geo_of(task["ip"])[2], "created": time.time(), "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
-    return h.send_json(200, {"round": rid, "verdict": {"code": vcode, "text": vtext}, "targets": out_targets,
+    return h.send_json(200, {"round": rid, "verdict": {"code": vcode, "text": vtext, "text_en": vtext_en}, "targets": out_targets,
                              "src_same": same, "attribution": S.GEO_ATTRIBUTION})
 
 
@@ -1221,7 +1276,7 @@ def nodes_public(h, ip):
     for t in TARGETS:                      # опорные серверы проекта: по ним строится вывод (адресов не отдаём)
         g = S.GEO.lookup(t["ip"], force=True) or {}
         st = astat.get(t["code"], [0, 0])
-        anchors.append({"code": t["code"], "name": t["name"], "country": t.get("country") or g.get("country"),
+        anchors.append({"code": t["code"], "name": t["name"], "name_en": t["name_en"], "country": t.get("country") or g.get("country"),
                         "online": now - TARGET_SEEN.get(t["code"], 0) < 90, "checks": st[0], "ok": st[1]})
     return h.send_json(200, {"online": online, "total": len(out), "refs_active": refs_on, "nodes": out, "anchors": anchors})
 
@@ -1279,6 +1334,46 @@ def _is_person_org(org):
 def _store_org(org):
     """В базу название организации из whois кладём, только если это не физическое лицо: вместо имени человека хранится «Частное лицо»."""
     return "Частное лицо" if org and _is_person_org(org) else org
+
+
+_TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+                     ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya"]))
+_names_en = {"mtime": 0, "data": {}}
+
+
+def translit(text):
+    """Запасной вариант английского названия: русские буквы латиницей (ГОСТ 7.79-подобная схема)."""
+    out = []
+    for ch in str(text):
+        low = ch.lower()
+        if low in _TRANSLIT:
+            t = _TRANSLIT[low]
+            out.append(t.capitalize() if ch != low and t else t)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def en_name(name):
+    """Английское название провайдера: словарь names_en.json, «Частный провайдер ASn» -> «Private provider ASn», иначе транслитерация."""
+    n = str(name or "")
+    if not re.search(r"[А-Яа-яЁё]", n):
+        return n
+    try:
+        f = os.path.join(S.GEO_DIR, "names_en.json")
+        mt = os.stat(f).st_mtime
+        if mt != _names_en["mtime"]:
+            with open(f, encoding="utf-8") as fh:
+                _names_en["data"] = {str(k): str(v) for k, v in json.load(fh).items()}
+            _names_en["mtime"] = mt
+    except (OSError, ValueError, AttributeError):
+        pass
+    if n in _names_en["data"]:
+        return _names_en["data"][n]
+    m = re.fullmatch(r"Частный провайдер AS(\d+)", n)
+    if m:
+        return "Private provider AS" + m.group(1)
+    return translit(n)
 
 
 def clean_name(text):
@@ -1844,6 +1939,10 @@ def _name_flags(name, asn=None):
         f.append("осталось капсом")
     if re.search(r"[^\w\s.\-&()'+]", name) or name.strip("()^ =-") != name:
         f.append("странные символы")
+    if re.search(r"[А-Яа-яЁё]", name) and not name.startswith("Частный провайдер"):
+        en_name(name)                                      # загрузить словарь английских названий
+        if name not in _names_en["data"]:
+            f.append("нет английского названия: на английской странице будет транслитерация")
     org = _org_of(asn) if asn is not None else None
     if looks_like_person_org(org) and not name.startswith("Частный"):
         f.append("в организации похоже на имя человека: проверьте, не физлицо ли")
@@ -1909,7 +2008,7 @@ def journal_list(h, ip):
             inf = json.loads(info or "{}")
         except ValueError:
             inf = {}
-        ev.append({"ts": ts, "asn": asn, "name": provider_name(asn, org), "kind": kind, "old": old, "new": new, "info": inf})
+        ev.append({"ts": ts, "asn": asn, "name": provider_name(asn, org), "name_en": en_name(provider_name(asn, org)), "kind": kind, "old": old, "new": new, "info": inf})
         if len(ev) >= 100:
             break
     return h.send_json(200, {"generated": int(time.time()), "events": ev})
@@ -1966,13 +2065,13 @@ def providers_list(h, ip):
         last = max(seen[a][1] for a in asns)
         org = public_org(rep_asn, orgs.get(rep_asn))
         sz = _size_sum(size, asns)
-        out.append({"asn": rep_asn, "name": g["name"], "org": org, "status": st, "asns": sorted(asns) if len(asns) > 1 else None,
+        out.append({"asn": rep_asn, "name": g["name"], "name_en": en_name(g["name"]), "org": org, "status": st, "asns": sorted(asns) if len(asns) > 1 else None,
                     "weak": int(r24) < 5, "nodes": sum(nodes24.get(a, 0) for a in asns), "rounds_1h": sum(r1h.get(a, 0) for a in asns),
                     "rounds_24h": int(r24), "web_24h": sum(web24.get(a, 0) for a in asns),
                     "logo": provider_logo(rep_asn), "series": series, "last_age": now - last, "old": old,
                     "size_cut": bool(sz["browsers"] >= 2 and sz["cut"] * 2 >= sz["tested"]),
                     "kind": provider_kind(rep_asn, orgs.get(rep_asn), g["name"]),
-                    "search": " ".join([g["name"], org or ""] + ["as%d" % a for a in asns] + [provider_name(a) for a in asns]).lower()})
+                    "search": " ".join([g["name"], en_name(g["name"]), org or ""] + ["as%d" % a for a in asns] + [provider_name(a) for a in asns]).lower()})
     order = {"cut": 0, "partial": 1, "ok": 2, "noanchor": 3, "stale": 4}
     out.sort(key=lambda p: (order.get(p["status"], 9), -p["rounds_24h"]))
     _plist.update(t=now, data={"generated": now, "providers": out})
@@ -2008,6 +2107,7 @@ def provider_detail(h, ip, asn):
                                              "GROUP BY target, kind, status, tcp" % ph, A + (now - 86400,), many=True):
         kind = "foreign" if kind == "foreign" else "home"
         e = targets.setdefault(tgt, {"code": tgt, "kind": kind, "name": next((t["name"] for t in TARGETS if t["code"] == tgt), tgt),
+                                     "name_en": next((t["name_en"] for t in TARGETS if t["code"] == tgt), tgt),
                                      "status": {}, "tcp_ok": 0, "tcp_total": 0})
         e["status"][status] = e["status"].get(status, 0) + n
         if tcp != "NA":
@@ -2033,7 +2133,7 @@ def provider_detail(h, ip, asn):
     name = provider_name(asn, org)
     sz = _size_sum(_size_scan(now - 86400, asn=set(asns)), asns)
     return h.send_json(200, {
-        "asn": asn, "asns": asns if len(asns) > 1 else None, "name": name, "org": public_org(asn, org), "country": pcountry, "status": st, "old": old,
+        "asn": asn, "asns": asns if len(asns) > 1 else None, "name": name, "name_en": en_name(name), "org": public_org(asn, org), "country": pcountry, "status": st, "old": old,
         "kind": provider_kind(asn, org, name), "weak": int(r24) < 5, "nodes": nn, "web_24h": sum(web.values()), "logo": provider_logo(asn),
         "rounds_1h": int(sum(b["cut"] + b["ok"] + b["bad"] + b["na"] for b in bk[-1:])), "rounds_24h": int(r24), "rounds_7d": int(sum(b["cut"] + b["ok"] + b["bad"] + b["na"] for b in bk)),
         "first_seen": first[0], "last_age": now - first[1], "hour_now": hour_now * 3600,
@@ -2309,7 +2409,7 @@ def _community_for_browser(ip, vasn, vc):
     out = []
     for r in cand[:2]:
         kind = _kind_rel(r[9], vc)
-        out.append({"code": "REF-%d" % r[0], "kind": kind, "name": "сервер добровольца", "country": r[9], "community": True,
+        out.append({"code": "REF-%d" % r[0], "kind": kind, "name": "сервер добровольца", "name_en": "volunteer server", "country": r[9], "community": True,
                     "control": bool(kind == "home" and not home_project), "ip": r[3], "ports": json.loads(r[4])[:2]})
     return out
 
@@ -2327,7 +2427,7 @@ def web_stun(h, ip):
     if not ok:
         return h.err(429, "слишком часто", retry)
     vasn, _org, vc, _city = _geo_of(ip)
-    targets = [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"], "ip": t["ip"],
+    targets = [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"], "name_en": t["name_en"], "ip": t["ip"],
                 "ports": [p for p in t["ports"] if p in STUN_PORTS]} for t in TARGETS]
     if ip and any(TARGET_PAD.get(t["code"]) for t in TARGETS):
         # просим серверы разрешить этому посетителю длинные ответы и ждём подтверждения (адрес подтверждён: он пришёл к нам по TCP)
@@ -2450,7 +2550,7 @@ def web_trace_start(h, ip):
         WTRACES[wid] = {"ip": ip, "asn": g.get("asn"), "org": _store_org(g.get("org")), "src": "web", "country": _geo_of(ip)[2], "created": time.time(),
                         "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
     vc = _geo_of(ip)[2]
-    return h.send_json(202, {"id": wid, "targets": [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"]} for t in TARGETS]})
+    return h.send_json(202, {"id": wid, "targets": [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"], "name_en": t["name_en"]} for t in TARGETS]})
 
 
 def web_trace_get(h, ip, wid):
@@ -2465,7 +2565,7 @@ def web_trace_get(h, ip, wid):
         tl = []
         for t in TARGETS:
             res = w["targets"].get(t["code"])
-            tl.append({"code": t["code"], "kind": _kind_rel(t.get("country"), w.get("country")), "name": t["name"],
+            tl.append({"code": t["code"], "kind": _kind_rel(t.get("country"), w.get("country")), "name": t["name"], "name_en": t["name_en"],
                        "status": "done" if res is not None else ("timeout" if age > 60 else "pending"),
                        "results": res if res is not None else {}})
     return h.send_json(200, {"done": all(x["status"] != "pending" for x in tl), "targets": tl})

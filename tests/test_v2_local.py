@@ -127,6 +127,7 @@ V.DB = None
 # ---------------------------------------------------------------- 1в. сети по хопам определяет хаб
 print("[сети по хопам определяет хаб, а не цель]")
 import types
+os.environ["UDPCHECK_LANG"] = "ru"          # тесты сверяют русский вывод агента
 
 
 class StubGeo:
@@ -261,7 +262,9 @@ try:
     check("web/stun без заголовка X-Client (так выглядит запрос с чужой страницы) -> 403", api("GET", "/api/v2/web/stun", headers={"X-Client": ""})[0] == 403)
     check("web/trace с Sec-Fetch-Site: cross-site -> 403", api("POST", "/api/v2/web/trace", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403)
     check("web/report без X-Client -> 403", api("POST", "/api/v2/web/report", {"verdict": "NO_BLOCK", "results": []}, headers={"X-Client": ""})[0] == 403)
-    check("запрос со страницы (same-origin) проходит", api("GET", "/api/v2/web/stun", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200)
+    st, wsn = api("GET", "/api/v2/web/stun", headers={"Sec-Fetch-Site": "same-origin"})
+    check("запрос со страницы (same-origin) проходит", st == 200)
+    check("серверы в списке для браузера отдают name и name_en (для английской версии сайта)", all(t.get("name") and t.get("name_en") for t in wsn["targets"]), wsn)
 
     def rawhub(data, wait=0.6):
         sk = socket.create_connection(("127.0.0.1", 18080), timeout=5)

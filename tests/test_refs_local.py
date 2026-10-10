@@ -20,6 +20,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, ROOT)
+os.environ["UDPCHECK_LANG"] = "ru"          # тесты сверяют русский вывод агента
 import udpcheck_node as N
 
 
@@ -291,7 +292,7 @@ try:
     check("в публичном списке про сервер нет хостинга (сети и организации), домашний узел остаётся с сетью",
           ent["asn"] is None and ent["org"] is None and all(n["role"] != "node" or "asn" in n for n in nl2["nodes"]), ent)
     check("у опорных серверов проекта в списке код, имя, страна и активность (без сети и хостинга)",
-          all(set(a) == {"code", "name", "country", "online", "checks", "ok"} for a in nl2["anchors"]), nl2["anchors"])
+          all(set(a) == {"code", "name", "name_en", "country", "online", "checks", "ok"} for a in nl2["anchors"]), nl2["anchors"])
     st, ipr = N.http(HUB, "GET", "/api/v2/ip")
     check("/api/v2/ip отдаёт адрес запрашивающего (для выбора роли установщиком)", st == 200 and ipr.get("ip") == "127.0.0.1", ipr)
     XFF["v"] = "10.0.0.5"
