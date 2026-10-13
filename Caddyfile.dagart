@@ -2,6 +2,8 @@
 # write 60s: хаб держит ответ до 25 с (длинный опрос серверов-целей).
 {
 	servers {
+		# обезличенные счётчики запросов (без адресов и заголовков): их раз в час снимает хаб (udpcheck_v2.site_stats_tick), живут в Caddy на 127.0.0.1:2019/metrics
+		metrics
 		timeouts {
 			read_header 10s
 			read_body 20s

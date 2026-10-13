@@ -68,7 +68,7 @@ EN_HTML = {
     "priv_li7": "This is a test project. Conclusions refer to the servers checked and to the moment of measurement.",
     "footer_attr": 'IP geolocation by <a href="https://db-ip.com">DB-IP.com</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). City names: <a href="https://www.geonames.org">GeoNames</a> (<a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>). Network names and types: <a href="https://stat.ripe.net">RIPEstat</a> (RIPE NCC) and <a href="https://www.peeringdb.com">PeeringDB</a>.',
     "footer_links": '<a href="@@LP@@/privacy">Privacy policy</a> · <a href="@@LP@@/terms">Terms</a> · <a href="/protocol.txt">Node protocol</a> · <a href="https://github.com/Dagart-xyz/udpcheck" rel="noopener">Source code (AGPL-3.0)</a> · Contact: <a href="mailto:draldrean@protonmail.com">draldrean@protonmail.com</a>',
-    "notice_text": 'We use no cookies and no counters; the only thing stored in your browser is a random number for rate limits. <a href="@@LP@@/privacy">More</a>',
+    "notice_text": 'We use no cookies and no third-party counters; the only thing stored in your browser is a random number for rate limits and anonymous visit counting. <a href="@@LP@@/privacy">More</a>',
     "notice_btn": "Got it", "newver_text": "A new version of the site is available.", "newver_btn": "Refresh",
     "langsw_title": "Language", "langsw_label": "EN",
     "langhint_text": "Этот сайт также доступен на русском.", "langhint_link": "Русский", "langhint_close": "Закрыть",

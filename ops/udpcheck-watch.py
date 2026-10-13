@@ -35,6 +35,8 @@ EXPIRY = [x.strip() for x in os.environ.get("WATCH_EXPIRY", "").split(",") if "=
 EXPIRY_HOUR = int(os.environ.get("EXPIRY_HOUR", "10"))                # во сколько по Москве напоминать
 NAMES_HOUR = int(os.environ.get("NAMES_HOUR", "19"))                  # во сколько по Москве присылать разбор названий провайдеров
 NAMES_EVERY_DAYS = int(os.environ.get("NAMES_EVERY_DAYS", "1"))       # как часто (потом можно поставить 7)
+SITE_HOUR = int(os.environ.get("SITE_HOUR", "9"))                          # во сколько по Москве присылать вчерашние итоги сайта (SITE_DIGEST=0 отключает)
+SITE_DIGEST = os.environ.get("SITE_DIGEST", "1") != "0"
 REBOOT_AFTER_H = int(os.environ.get("WATCH_REBOOT_AFTER_H", "48"))    # сколько часов можно жить с неприменённым обновлением ядра, прежде чем сообщить
 SECUPD_AFTER_H = int(os.environ.get("WATCH_SECUPD_AFTER_H", "72"))    # сколько часов обновления безопасности могут ждать установки
 BANS_SURGE = int(os.environ.get("WATCH_BANS_SURGE", "60"))            # банов fail2ban за час на одном сервере: волна подбора
@@ -267,6 +269,29 @@ def names_digest(st):
             pass
 
 
+def site_digest(st):
+    """Раз в сутки в SITE_HOUR по Москве: итоги вчерашнего дня с хаба (заходы, браузеры, нажатия «Проверить», ответы не успехом) и среднее за неделю до этого."""
+    t = now()
+    day = int((t + 3 * 3600) // 86400)
+    if not SITE_DIGEST or not BEAT_SECRET or not (SITE_HOUR <= msk_hour(t) < SITE_HOUR + 3) or st.get("site_day", 0) >= day:
+        return
+    try:
+        data = http("/api/v2/stats/site?days=9", headers={"X-Beat": BEAT_SECRET})
+    except Exception:
+        return
+    y = time.strftime("%Y-%m-%d", time.gmtime(t + 3 * 3600 - 86400))
+    rows = {r["day"]: r for r in data.get("days", [])}
+    r = rows.get(y) or {"views": 0, "browsers": 0, "starts": 0, "checks": 0, "check_browsers": 0, "http_errors": {}}
+    prev = [v for d, v in rows.items() if d < y][:7]
+    avg = (sum(v["browsers"] for v in prev) // len(prev)) if prev else None
+    errs = ", ".join("%s: %d" % (c, n) for c, n in sorted(r["http_errors"].items(), key=lambda x: -x[1])[:4]) or "нет"
+    text = ("Сайт за %s.%s: загрузок страницы %d, разных браузеров %d%s. Нажали «Проверить»: %d браузеров (проверок в статистике %d). "
+            "Ответы сервера не успехом (код: сколько): %s." % (y[8:10], y[5:7], r["views"], r["browsers"],
+                                                               (" (в среднем за прошлые дни %d)" % avg) if avg is not None else "", r["check_browsers"], r["checks"], errs))
+    if deliver(text):
+        st["site_day"] = day
+
+
 def run():
     st = load()
     st.setdefault("checks", {})
@@ -302,6 +327,7 @@ def run():
             check(st, "mem", ma < 50, 3, "на хабе заканчивается память (доступно %d МБ)." % ma, "память хаба снова в порядке")
     expiry_check(st)
     names_digest(st)
+    site_digest(st)
     flush(st)
     save(st)
 

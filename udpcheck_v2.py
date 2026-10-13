@@ -45,6 +45,8 @@ REF_MIN_AGE = int(os.environ.get("UDPCHECK_REF_MIN_AGE", "86400"))          # ч
 REF_MIN_ROUNDS = int(os.environ.get("UDPCHECK_REF_MIN_ROUNDS", "3"))       # ...и сделавшим хотя бы столько замеров
 REF_MAX_PER_DAY = int(os.environ.get("UDPCHECK_REF_MAX_PER_DAY", "5"))     # разных чужих опорных серверов на один узел в сутки
 BEAT_SECRET = os.environ.get("UDPCHECK_BEAT_SECRET", "")           # секрет «сигнала жизни» от наблюдателя (оповещения)
+CADDY_METRICS = os.environ.get("UDPCHECK_CADDY_METRICS", "http://127.0.0.1:2019/metrics")      # счётчики запросов веб-сервера (Caddy, директива metrics)
+CADDY_EVERY = int(os.environ.get("UDPCHECK_CADDY_SAMPLE_S", "300"))                                   # как часто снимать счётчики Caddy
 NTFY_TOPIC = os.environ.get("UDPCHECK_NTFY_TOPIC", "")             # тема ntfy.sh: с хаба Telegram недоступен, а ntfy доступен
 BACKUP_MARK = os.environ.get("UDPCHECK_BACKUP_MARK", "/var/lib/private/udpcheck/last_backup")    # сюда скрипт копий пишет время успеха
 T0 = time.time()
@@ -489,6 +491,8 @@ CREATE INDEX IF NOT EXISTS journal_ts ON journal(ts);
 CREATE TABLE IF NOT EXISTS asnstate(asn INTEGER PRIMARY KEY, status TEXT, ts INTEGER);
 CREATE TABLE IF NOT EXISTS asnmeta(asn INTEGER PRIMARY KEY, pdb_type TEXT, pdb_name TEXT, website TEXT, ts INTEGER);
 CREATE TABLE IF NOT EXISTS namesrep(asn INTEGER PRIMARY KEY, name TEXT, ts INTEGER);
+CREATE TABLE IF NOT EXISTS sitestats(day TEXT, k TEXT, n INTEGER, PRIMARY KEY(day, k));
+CREATE TABLE IF NOT EXISTS hubmeta(k TEXT PRIMARY KEY, v TEXT);
 CREATE INDEX IF NOT EXISTS web_asn ON webchecks(asn, ts);
 CREATE INDEX IF NOT EXISTS rounds_asn ON rounds(asn, ts);
 CREATE INDEX IF NOT EXISTS tres_asn ON tres(asn, ts);
@@ -710,6 +714,10 @@ def janitor():
             pass
         try:
             beat_watch(now)
+        except Exception:
+            pass
+        try:
+            site_stats_tick(now)
         except Exception:
             pass
         if now - JOURNAL_STATE["last"] >= JOURNAL_EVERY:
@@ -1871,6 +1879,121 @@ def _db_writable():
         return False
 
 
+# ---- обезличенные счётчики сайта --------------------------------------------------------------------------------------------------------------
+# Что считаем: сколько раз загружена страница (запрос списка провайдеров делает JS страницы), сколько нажатий «Проверить» (запуск трассировки), сколько разных
+# браузеров за сутки (хэш «суточная соль + случайный номер браузера», сам номер и хэш на диск не пишутся, в базе только число) и сколько запросов Caddy
+# ответил не успехом (404 от сканеров, 429, 5xx). Адресов, заголовков и путей нет. Сутки по Москве. Смотреть: GET /api/v2/stats/site (с секретом наблюдателя).
+SITE_CNT = {}                                  # (сутки, ключ) -> сколько прибавить к базе
+SITE_UNIQ = {"day": "", "set": set()}
+SITE_STATE = {"flush": 0.0, "caddy": 0.0}
+SITE_LOCK = threading.Lock()
+SITE_UNIQ_MAX = 100000
+
+
+def _msk_day(t=None):
+    return time.strftime("%Y-%m-%d", time.gmtime((time.time() if t is None else t) + 3 * 3600))
+
+
+def site_count(key, h=None, n=1):
+    """Прибавить к счётчику суток; если передан запрос с номером браузера, учесть браузер среди уникальных за сутки."""
+    d = _msk_day()
+    with SITE_LOCK:
+        SITE_CNT[(d, key)] = SITE_CNT.get((d, key), 0) + n
+        if h is not None:
+            c = h.headers.get("X-Client", "")
+            if re.fullmatch(r"[0-9a-f]{32}", c):
+                if SITE_UNIQ["day"] != d:
+                    SITE_UNIQ["day"], SITE_UNIQ["set"] = d, set()
+                if len(SITE_UNIQ["set"]) < SITE_UNIQ_MAX:
+                    SITE_UNIQ["set"].add(hashlib.sha256((d + ":" + c).encode()).digest()[:8])
+
+
+def _caddy_sample(now):
+    """Раз в несколько минут: сколько запросов Caddy ответил не успехом (код не 2xx) с прошлого снимка. Счётчик Caddy обнуляется при его перезапуске:
+    если число стало меньше прежнего, берём его целиком."""
+    try:
+        text = urllib.request.urlopen(CADDY_METRICS, timeout=3).read(4000000).decode("utf-8", "replace")
+    except Exception:
+        return
+    if "caddy_http" not in text:
+        return              # пустой или чужой ответ: прежние значения не трогаем, иначе после возврата Caddy весь счётчик посчитался бы заново
+    cur = {}
+    for m in re.finditer(r"^caddy_http_request_duration_seconds_count\{([^}]*)\}\s+([0-9.eE+]+)", text, re.M):
+        lab = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+        code = lab.get("code", "")
+        if lab.get("handler") != "subroute" or not re.fullmatch(r"\d{3}", code) or code.startswith("2"):
+            continue            # основной адрес сайта (его обработчик subroute); успешные ответы в основном опросы серверов, их не считаем
+        cur["http:" + code] = cur.get("http:" + code, 0) + int(float(m.group(2)))
+    row = db_exec("SELECT v FROM hubmeta WHERE k='caddy_last'", one=True)
+    try:
+        last = json.loads(row[0]) if row else {}
+    except ValueError:
+        last = {}
+    for k, v in cur.items():
+        old = last.get(k, 0)
+        delta = v - old if v >= old else v
+        if delta > 0:
+            site_count(k, None, delta)
+    db_exec("INSERT OR REPLACE INTO hubmeta(k, v) VALUES('caddy_last', ?)", (json.dumps(cur),))
+
+
+def site_stats_tick(now):
+    """Вызывается из janitor: раз в 5 минут снимок Caddy, раз в минуту запись накопленного в базу."""
+    if now - SITE_STATE["caddy"] >= CADDY_EVERY:
+        SITE_STATE["caddy"] = now
+        _caddy_sample(now)
+    if now - SITE_STATE["flush"] < 60:
+        return
+    SITE_STATE["flush"] = now
+    with SITE_LOCK:
+        cnt = dict(SITE_CNT)
+        SITE_CNT.clear()
+        uniq = (SITE_UNIQ["day"], len(SITE_UNIQ["set"]))
+    try:
+        for (d, k), n in cnt.items():
+            db_exec("INSERT INTO sitestats(day, k, n) VALUES(?, ?, ?) ON CONFLICT(day, k) DO UPDATE SET n = n + excluded.n", (d, k, n))
+        if uniq[0]:                          # после перезапуска хаба набор начинается заново: число за сутки не уменьшаем
+            db_exec("INSERT INTO sitestats(day, k, n) VALUES(?, 'browsers', ?) ON CONFLICT(day, k) DO UPDATE SET n = MAX(n, excluded.n)", (uniq[0], uniq[1]))
+        if int(now) // 60 % 60 == 0:         # раз в час чистим данные старше года
+            db_exec("DELETE FROM sitestats WHERE day < ?", (_msk_day(now - 400 * 86400),))
+    except Exception:
+        with SITE_LOCK:                      # не получилось записать: вернуть, чтобы не потерять
+            for key, n in cnt.items():
+                SITE_CNT[key] = SITE_CNT.get(key, 0) + n
+
+
+def stats_site(h, ip):
+    """Итоги по суткам для владельца (секрет наблюдателя): заходы, браузеры, нажатия «Проверить», проверки из базы, ответы не успехом."""
+    if not _beat_ok(h, ip):
+        return h.err(403, "нужен секрет наблюдателя")
+    q = re.search(r"days=(\d+)", h.path)
+    days = max(1, min(int(q.group(1)) if q else 7, 60))
+    site_stats_tick_flush_now()
+    today = time.time()
+    out = {}
+    first = _msk_day(today - (days - 1) * 86400)
+    for d, k, n in db_exec("SELECT day, k, n FROM sitestats WHERE day >= ?", (first,), many=True):
+        out.setdefault(d, {})[k] = n
+    for d, c, b in db_exec("SELECT date(ts + 10800, 'unixepoch'), COUNT(*), COUNT(DISTINCT COALESCE(cid, 'i' || id)) FROM webchecks WHERE ts >= ? GROUP BY 1",
+                           (int(today) - (days + 1) * 86400,), many=True):
+        if d >= first:
+            out.setdefault(d, {}).update({"checks": c, "check_browsers": b})
+    res = []
+    for d in sorted(out, reverse=True):
+        v = out[d]
+        res.append({"day": d, "views": v.get("views", 0), "browsers": v.get("browsers", 0), "starts": v.get("starts", 0),
+                    "checks": v.get("checks", 0), "check_browsers": v.get("check_browsers", 0),
+                    "http_errors": {k[5:]: n for k, n in v.items() if k.startswith("http:")}})
+    return h.send_json(200, {"days": res, "today": _msk_day(today)})
+
+
+def site_stats_tick_flush_now():
+    """Записать накопленное сейчас (чтобы запрос итогов видел свежие числа)."""
+    SITE_STATE["flush"] = 0.0
+    site_stats_tick(time.time())
+    SITE_STATE["flush"] = 0.0
+
+
 def _beat_ok(h, ip):
     """Секрет наблюдателя в заголовке X-Beat. Неверные попытки считаются по адресу: перебор упирается в лимит."""
     got = h.headers.get("X-Beat", "")
@@ -2611,6 +2734,7 @@ def dispatch(h, method, path):
     if path == "/api/v2/web/me" and method == "GET":
         return web_me(h, ip)
     if path == "/api/v2/web/trace" and method == "POST":
+        site_count("starts", h)
         h.read_body(4096)
         return web_trace_start(h, ip)
     m = re.fullmatch(r"/api/v2/web/trace/([0-9a-f]{16})", path)
@@ -2652,7 +2776,10 @@ def dispatch(h, method, path):
     if path == "/api/v2/journal" and method == "GET":
         return journal_list(h, ip)
     if path == "/api/v2/providers" and method == "GET":
+        site_count("views", h)
         return providers_list(h, ip)
+    if path == "/api/v2/stats/site" and method == "GET":
+        return stats_site(h, ip)
     m = re.fullmatch(r"/api/v2/providers/(\d{1,10})", path)
     if m and method == "GET":
         return provider_detail(h, ip, int(m.group(1)))

@@ -51,8 +51,10 @@ cannot build a route to you. We collect nothing beyond what is needed for that.<
 <td>only in the server's memory, for minutes. <b>It is not written to the database or to logs.</b> The web server keeps no access logs</td></tr>
 <tr><td><b>Check result</b>: network number (ASN), provider name, country, how many replies came from which servers, time</td>
 <td>statistics per provider, provider pages, the change journal</td><td>in the database, 60 days</td></tr>
-<tr><td><b>Random browser number</b></td><td>rate limits, so that one browser is not counted in the statistics more than once an hour</td>
+<tr><td><b>Random browser number</b></td><td>rate limits, so that one browser is not counted in the statistics more than once an hour; counting how many different browsers visit per day (see below)</td>
 <td>created by the page and stored in your browser (localStorage, key <code>udpc_cid</code>); the database holds only its hash (SHA-256, 16 characters), for 60 days. It is not linked to you and does not collect device data</td></tr>
+<tr><td><b>Anonymous visit statistics</b></td><td>to understand how many people use the site and whether the server copes</td>
+<td>numbers per day only: how many times the page was loaded, how many different browsers, how many times “Check” was pressed, how many requests the server rejected or could not serve. Different browsers are counted by a hash of “date + random number”: the hash itself is never written to disk, only the number remains. Addresses, headers and pages are not recorded. Kept for up to a year</td></tr>
 <tr><td><b>Intermediate route hops</b></td><td>to show you the route and the places where it breaks</td><td>hop addresses only in memory and in your page; the database gets only the numbers of the networks along the path</td></tr>
 <tr><td><b>Data in your browser</b></td><td>to show the last route without asking again</td><td>localStorage (<code>udpc_trace</code>, up to 6 hours), a mark that the notice was closed (<code>udpc_notice</code>) and the chosen language (<code>udpc_lang</code>); cleared together with the site data</td></tr>
 <tr><td><b>Nodes and volunteer servers</b> (if you install them)</td><td>operation of the check network</td><td>callsign, network, country, approximate city, type of system, key hash; for a volunteer server also its IP (not shown publicly) while it takes part</td></tr>
