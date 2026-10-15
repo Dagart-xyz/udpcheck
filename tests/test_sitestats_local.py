@@ -120,7 +120,7 @@ try:
     check("загрузки страницы: 4 (3 с номером браузера и 1 без)", row.get("views") == 4, row)
     check("уникальные браузеры за сутки: 2", row.get("browsers") == 2, row)
     check("нажатия «Проверить»: 1 (чужой сайт не считается)", row.get("starts") == 1, row)
-    check("ответы Caddy не успехом: 404 и 429 основного сайта, успешные и внутренний адрес не учтены", row.get("http_errors") == {"404": 10, "429": 2, "301": 5}, row.get("http_errors"))
+    check("ответы Caddy не успехом: 404 и 429 основного сайта, успешные, 3xx и внутренний адрес не учтены", row.get("http_errors") == {"404": 10, "429": 2}, row.get("http_errors"))
 
     time.sleep(1.2)
     METRICS["text"] = mk("200", 100050) + mk("404", 14) + mk("429", 2) + mk("301", 5)
@@ -151,7 +151,7 @@ try:
     db = sqlite3.connect(os.path.join(tmp, "hub.db"), timeout=10)
     rows = db.execute("SELECT day, k, n FROM sitestats").fetchall()
     keys = {k for _, k, _ in rows}
-    check("в таблице sitestats только известные ключи и числа", keys <= {"views", "browsers", "starts", "http:404", "http:429", "http:301"}, keys)
+    check("в таблице sitestats только известные ключи и числа", keys <= {"views", "browsers", "starts", "http:404", "http:429"}, keys)
     dump = json.dumps(rows)
     check("номеров браузеров и их хэшей в базе нет", C1 not in dump and C2 not in dump and "127.0.0.1" not in dump, dump)
 
@@ -175,7 +175,7 @@ try:
     check("днём (14:00) сводка сайта не приходит", "Сайт за" not in out, out)
     out = watch(9)
     check("утром (09:00) приходит сводка за вчера с числами", "Сайт за" in out and "загрузок страницы 150" in out and "разных браузеров 98" in out and "(в среднем за прошлые дни 60)" in out
-          and "404: 530" in out, out)
+          and "404 (не найдено, в основном сканеры): 530" in out, out)
     out = watch(10)
     check("в тот же день повторно сводка не приходит", "Сайт за" not in out, out)
     out = watch(9) if False else out

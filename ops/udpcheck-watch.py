@@ -282,9 +282,10 @@ def site_digest(st):
     y = time.strftime("%Y-%m-%d", time.gmtime(t + 3 * 3600 - 86400))
     rows = {r["day"]: r for r in data.get("days", [])}
     r = rows.get(y) or {"views": 0, "browsers": 0, "starts": 0, "checks": 0, "check_browsers": 0, "http_errors": {}}
-    prev = [v for d, v in rows.items() if d < y][:7]
+    prev = [v for d, v in sorted(rows.items(), reverse=True) if d < y and v.get("browsers")][:7]          # только дни, когда счёт уже шёл
     avg = (sum(v["browsers"] for v in prev) // len(prev)) if prev else None
-    errs = ", ".join("%s: %d" % (c, n) for c, n in sorted(r["http_errors"].items(), key=lambda x: -x[1])[:4]) or "нет"
+    why = {"400": "плохой запрос", "403": "запрещено", "404": "не найдено, в основном сканеры", "405": "метод", "429": "лимит частоты", "499": "клиент оборвал соединение", "500": "ошибка", "502": "хаб недоступен", "503": "сервис занят", "504": "хаб не ответил"}
+    errs = ", ".join("%s%s: %d" % (c, (" (" + why[c] + ")") if c in why else "", n) for c, n in sorted(r["http_errors"].items(), key=lambda x: -x[1])[:4]) or "нет"
     text = ("Сайт за %s.%s: загрузок страницы %d, разных браузеров %d%s. Нажали «Проверить»: %d браузеров (проверок в статистике %d). "
             "Ответы сервера не успехом (код: сколько): %s." % (y[8:10], y[5:7], r["views"], r["browsers"],
                                                                (" (в среднем за прошлые дни %d)" % avg) if avg is not None else "", r["check_browsers"], r["checks"], errs))

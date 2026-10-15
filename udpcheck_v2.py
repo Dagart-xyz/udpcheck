@@ -1921,8 +1921,8 @@ def _caddy_sample(now):
     for m in re.finditer(r"^caddy_http_request_duration_seconds_count\{([^}]*)\}\s+([0-9.eE+]+)", text, re.M):
         lab = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
         code = lab.get("code", "")
-        if lab.get("handler") != "subroute" or not re.fullmatch(r"\d{3}", code) or code.startswith("2"):
-            continue            # основной адрес сайта (его обработчик subroute); успешные ответы в основном опросы серверов, их не считаем
+        if lab.get("handler") != "subroute" or not re.fullmatch(r"\d{3}", code) or code[0] in "23":
+            continue            # основной адрес сайта (его обработчик subroute); успешные ответы (2xx) и 3xx (304 «не изменилось», перенаправления) не считаем
         cur["http:" + code] = cur.get("http:" + code, 0) + int(float(m.group(2)))
     row = db_exec("SELECT v FROM hubmeta WHERE k='caddy_last'", one=True)
     try:
@@ -1983,7 +1983,7 @@ def stats_site(h, ip):
         v = out[d]
         res.append({"day": d, "views": v.get("views", 0), "browsers": v.get("browsers", 0), "starts": v.get("starts", 0),
                     "checks": v.get("checks", 0), "check_browsers": v.get("check_browsers", 0),
-                    "http_errors": {k[5:]: n for k, n in v.items() if k.startswith("http:")}})
+                    "http_errors": {k[5:]: n for k, n in v.items() if k.startswith("http:") and k[5] not in "23"}})
     return h.send_json(200, {"days": res, "today": _msk_day(today)})
 
 
