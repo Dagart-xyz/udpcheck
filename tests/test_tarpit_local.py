@@ -124,8 +124,9 @@ import json
 fake = {"198.51.100.20": ["crawl-198-51-100-20.googlebot.com", ["198.51.100.20"]],      # настоящий: имя Google, прямой DNS ведёт на тот же адрес
         "198.51.100.21": ["evil.example.net", ["198.51.100.21"]],                         # чужое имя
         "198.51.100.22": ["crawl-x.googlebot.com", ["203.0.113.99"]],                      # имя Google, но прямой DNS ведёт на другой адрес (подделка записи)
-        "2001:db8::20": ["spider-2001.yandex.com", ["2001:db8::20"]]}
-p = start(TARPIT_PROBE_MIN_S="0.6", TARPIT_PROBE_MAX_S="0.8", TARPIT_FAKE_DNS=json.dumps(fake))
+        "2001:db8::20": ["spider-2001.yandex.com", ["2001:db8::20"]],
+        "198.51.100.40": ["@sleep", []]}                                                   # DNS «подвешен»
+p = start(TARPIT_PROBE_MIN_S="0.6", TARPIT_PROBE_MAX_S="0.8", TARPIT_FAKE_DNS=json.dumps(fake), TARPIT_DNS_TIMEOUT_S="0.5")
 try:
     n0 = len(Up.seen)
     st, b, dt = get(ip="198.51.100.30", path="/wp-login.php?x=1", extra={"X-Probe": "1"})
@@ -157,6 +158,8 @@ try:
         check("подделка (%s): та же страница, но с задержкой" % why, st == 200 and b == BODY and dt >= 0.5, (st, dt))
     st, b, dt = get(ip="198.51.100.20", path="/p")
     check("без заголовка X-Claimed-Bot проверки нет: обычный путь с задержкой", st == 200 and dt >= 0.5, (st, dt))
+    st, b, dt = get(ip="198.51.100.40", path="/p", extra=H)
+    check("DNS не ответил вовремя: не пропускаем без задержки (ожидание DNS + медленный путь)", st == 200 and dt >= 1.0, (st, dt))
 finally:
     p.terminate()
     out = p.stdout.read().decode("utf-8", "replace")
@@ -190,6 +193,32 @@ try:
     check("нет обратной записи: подделка (False)", tp._dns_check("198.51.100.50") is False)
 finally:
     socket.gethostbyaddr = orig
+
+# одна проверка на адрес при одновременных запросах и предел одновременных проверок
+import asyncio
+calls = []
+
+
+def slow_check(ip):
+    calls.append(ip)
+    time.sleep(0.3)
+    return True
+tp._dns_check = slow_check
+tp.bot_cache.clear()
+
+
+async def many():
+    return await asyncio.gather(*[tp.real_bot("198.51.100.60") for _ in range(10)])
+res = asyncio.run(many())
+check("10 одновременных запросов с одного адреса: одна проверка DNS, у всех один ответ", calls.count("198.51.100.60") == 1 and all(res), (calls, res))
+tp.bot_cache.clear()
+tp.MAX_DNS_PENDING = 1
+
+
+async def two():
+    return await asyncio.gather(tp.real_bot("198.51.100.61"), tp.real_bot("198.51.100.62"))
+r1, r2 = asyncio.run(two())
+check("очередь проверок полна: следующий адрес сразу идёт медленным путём (не настоящий)", r1 is True and r2 is False, (r1, r2))
 
 
 srv.shutdown()

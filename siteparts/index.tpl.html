@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+@@CSPMETA@@
+<meta name="udpc-build" content="__BUILD__">
 <title>@{title}</title>
 <meta name="description" content="@{meta_desc}">
 <meta property="og:type" content="website">
@@ -322,7 +324,7 @@ button.btn.ghost{border:1px solid var(--line)}
 <script>
 (function(){
 "use strict";
-var BUILD = "__BUILD__";
+var BUILD = (document.querySelector('meta[name="udpc-build"]') || {}).content || "";      // метка версии в <meta>: так сам скрипт не меняется при выкладке и его хэш в CSP верен
 // Язык страницы, префикс адресов и тексты интерфейса (словарь подставляет сборка: siteparts/strings.py)
 var LANG = "@@LANG@@", LP = "@@LP@@", I18N = @@I18N@@;
 var TITLE0 = document.title;
@@ -1103,7 +1105,7 @@ window.addEventListener("popstate", route);
 })();
 // Открытая вкладка со старой версией: сверяем метку версии с сервером; если проверка не идёт, обновляем сама, иначе предлагаем кнопку
 function checkVersion(){
-  if (BUILD.indexOf("__") === 0) return;
+  if (!BUILD || BUILD.indexOf("__") === 0) return;          // страница не прошла выкладку (метка не проставлена): сверять нечего
   api("GET", "/api/v2/version").then(function(r){
     if (r.status !== 200 || !r.body.site || r.body.site === BUILD) return;
     var idle = !busy && !browserRes, stamp = "udpc_reload";

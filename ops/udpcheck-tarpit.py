@@ -11,7 +11,7 @@ Caddy и отдаёт её порциями. Живой человек с бра
   X-Probe: 1        запрос похож на атаку (поиск служебных файлов, SQL-инъекции, WordPress и т. п.). Служба пишет в журнал одну строку «PROBE адрес путь»
                     (по ней fail2ban банит повторивших, ops/hardening/fail2ban-probe-*), ждёт и отвечает 404. Страницы не отдаёт.
   X-Claimed-Bot: 1  запрос называет себя поисковым ботом (Google, Bing, Яндекс, Apple). Подлинность проверяется по обратному DNS с подтверждением прямым: настоящий
-                    бот проходит без задержки, подделка получает ту же замедленную страницу, что и прочие роботы. Нет ответа от DNS: считаем настоящим (не вредим индексации).
+                    бот проходит без задержки, подделка получает ту же замедленную страницу, что и прочие роботы. Нет ответа от DNS вовремя: считаем подделкой на 2 минуты.
 
 Лимиты, чтобы самому не стать целью: не больше TARPIT_MAX_TOTAL одновременных ожиданий и TARPIT_MAX_PER_IP с одного адреса; сверх лимита запрос
 проходит без задержки (не отказ), а лишние параллельные запросы с одного адреса получают 429. Состояния нет, адреса только в памяти; журнал один: строки PROBE (только для запросов, похожих на атаку).
@@ -46,6 +46,8 @@ FAKE_DNS = json.loads(os.environ.get("TARPIT_FAKE_DNS", "null") or "null")
 
 state = {"total": 0, "per_ip": {}}
 bot_cache = {}                                               # адрес -> (настоящий ли, до какого времени)
+dns_pending = {}                                             # адрес -> ожидание идущей проверки
+MAX_DNS_PENDING = int(os.environ.get("TARPIT_MAX_DNS_PENDING", "32"))
 dns_pool = ThreadPoolExecutor(max_workers=4)
 
 
@@ -77,6 +79,9 @@ def _dns_check(ip):
             if ip not in FAKE_DNS:
                 return False
             name, fwd = FAKE_DNS[ip]
+            if name == "@sleep":                             # тест: DNS не отвечает
+                time.sleep(DNS_TIMEOUT_S + 2)
+                return True
         else:
             name = socket.gethostbyaddr(ip)[0]
             fwd = None
@@ -96,21 +101,30 @@ def _dns_check(ip):
 
 
 async def real_bot(ip):
+    """Настоящий ли поисковик. Одновременные запросы с одного адреса ждут одну проверку; проверок одновременно не больше MAX_DNS_PENDING.
+    Если DNS не ответил вовремя или очередь проверок полна, считаем подделкой (медленный путь), но запоминаем ненадолго: иначе владелец своей
+    обратной зоны мог бы нарочно «подвешивать» ответ и проходить без задержки."""
     now = time.time()
     hit = bot_cache.get(ip)
     if hit and hit[1] > now:
         return hit[0]
-    try:
-        res = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(dns_pool, _dns_check, ip), timeout=DNS_TIMEOUT_S)
-    except (asyncio.TimeoutError, RuntimeError):
-        res = None
-    if res is None:                                          # DNS молчит: не наказываем, но и не запоминаем надолго
-        bot_cache[ip] = (True, now + 30)
-        return True
-    if len(bot_cache) > 5000:
-        bot_cache.clear()
-    bot_cache[ip] = (res, now + 3600)
-    return res
+    fut = dns_pending.get(ip)
+    if fut is None:
+        if len(dns_pending) >= MAX_DNS_PENDING:
+            return False
+        fut = asyncio.get_running_loop().create_future()
+        dns_pending[ip] = fut
+        try:
+            res = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(dns_pool, _dns_check, ip), timeout=DNS_TIMEOUT_S)
+        except (asyncio.TimeoutError, RuntimeError):
+            res = None
+        if len(bot_cache) > 5000:
+            bot_cache.clear()
+        bot_cache[ip] = (bool(res), now + (3600 if res is not None else 120))
+        dns_pending.pop(ip, None)
+        fut.set_result(bool(res))
+        return bool(res)
+    return await asyncio.shield(fut)
 
 
 def log_probe(ip, request_line):

@@ -2,7 +2,9 @@
 # Copyright (C) 2026 UDPcheck authors
 """Сборка страниц сайта на двух языках из шаблона siteparts/index.tpl.html и текстов siteparts/strings.py.
 Русский: site/index.html (адрес /), английский: site/en/index.html (адрес /en/). Здесь же robots.txt и sitemap.xml."""
+import base64
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -50,6 +52,13 @@ def render_index(lang):
           "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "license": "https://www.gnu.org/licenses/agpl-3.0.html",
           "codeRepository": "https://github.com/Dagart-xyz/udpcheck"}
     out = out.replace("@@JSONLD@@", '<script type="application/ld+json">' + json.dumps(ld, ensure_ascii=False).replace("</", r"<\/") + "</script>")
+    # CSP по хэшу единственного исполняемого скрипта: вставленный злоумышленником код (если бы нашлась дыра) браузер не выполнит.
+    # Заголовок Caddy разрешает 'unsafe-inline', эта политика его сужает: браузер соблюдает обе сразу.
+    scripts = re.findall(r"<script>(.*?)</script>", out, re.S)
+    assert len(scripts) == 1 and "<script " not in out.replace('<script type="application/ld+json">', ""), "ожидается ровно один исполняемый скрипт"
+    assert "__BUILD__" not in scripts[0], "метку __BUILD__ заменяет deploy_site.sh: внутри скрипта она изменила бы его хэш в CSP"
+    digest = base64.b64encode(hashlib.sha256(scripts[0].encode("utf-8")).digest()).decode()
+    out = out.replace("@@CSPMETA@@", "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'sha256-%s'; object-src 'none'; base-uri 'none'\">" % digest)
     assert "@@" not in out and not re.search(r"@\{\w+\}", out), "в странице остались неподставленные метки"
     return out
 

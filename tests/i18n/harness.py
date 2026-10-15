@@ -243,7 +243,8 @@ def run_scenario(browser, site, lang, sc):
     loc = "en-US" if lang == "en" else "ru-RU"
     if sc.get("locale") == "other":
         loc = "ru-RU" if lang == "en" else "en-US"
-    ctx = browser.new_context(locale=loc, timezone_id="Europe/Moscow", viewport={"width": WIDTH, "height": 900})
+    # bypass_csp: ожидания Playwright (wait_for_function) исполняют строки через eval, а CSP страницы это запрещает. Саму CSP проверяет csp_check() без обхода.
+    ctx = browser.new_context(locale=loc, timezone_id="Europe/Moscow", viewport={"width": WIDTH, "height": 900}, bypass_csp=True)
     ctx.add_init_script(INIT_JS % {"frozen": FROZEN_MS, "stun": json.dumps(stun), "ext": json.dumps(F.stun_ext_ips(mock.stun_profile)),
                                    "webrtc": "true" if sc.get("webrtc", True) else "false", "extra": old})
     page = ctx.new_page()
@@ -314,6 +315,38 @@ def lang_asserts(res, lang, only):
     return fails
 
 
+def csp_check(browser, site, lang):
+    """Страница под своей настоящей CSP (без обхода): единственный скрипт выполняется (хэш верен), меню языков отвечает, нарушений CSP в консоли нет."""
+    sc = {"name": "csp", "actions": [SNAP]}
+    mock = Mock(site, lang, sc)
+    ctx = browser.new_context(locale="en-US" if lang == "en" else "ru-RU", viewport={"width": WIDTH, "height": 900})
+    page = ctx.new_page()
+    msgs, errors = [], []
+    page.on("console", lambda m: msgs.append(m.text))
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    ctx.route("**/*", mock.handle)
+    page.goto(ORIGIN + ("/en/" if lang == "en" else "/"), wait_until="load")
+    page.wait_for_timeout(800)
+    ran = page.evaluate("() => !document.getElementById('notice').hidden")          # плашку о данных показывает только скрипт страницы (в чистом браузере)
+    page.click("#langbtn")
+    page.wait_for_timeout(200)
+    opened = page.evaluate("() => !document.getElementById('langlist').hidden")
+    viol = [m for m in msgs if "Content Security Policy" in m or "Refused to" in m]
+    # вставленный посторонний скрипт (как при XSS) не должен выполниться
+    blocked = page.evaluate("""() => { var x = document.createElement('script'); x.textContent = 'window.__inj = 1'; document.body.appendChild(x);
+                                       var d = document.createElement('div'); d.innerHTML = '<img src=x onerror="window.__inj2=1">'; document.body.appendChild(d);
+                                       return new Promise(function(r){ setTimeout(function(){ r(!window.__inj && !window.__inj2); }, 300); }); }""")
+    ctx.close()
+    fails = 0
+    for name, ok, extra in (("[%s] CSP: скрипт страницы выполняется под своей политикой (хэш верен)" % lang, ran, ""),
+                            ("[%s] CSP: меню языков работает" % lang, opened, ""),
+                            ("[%s] CSP: вставленный посторонний скрипт и обработчик onerror не выполняются" % lang, blocked, ""),
+                            ("[%s] CSP: нарушений в консоли нет" % lang, not viol and not errors, (viol + errors)[:3])):
+        print("  %s %s%s" % ("OK  " if ok else "FAIL", name, "" if ok else "   " + str(extra)[:300]))
+        fails += 0 if ok else 1
+    return fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--site", required=True)
@@ -339,11 +372,12 @@ def main():
             except Exception as e:
                 res[sc["name"]] = {"snaps": {}, "errors": ["ИСКЛЮЧЕНИЕ СЦЕНАРИЯ: " + str(e)[:200].replace(chr(10), " ")]}
             print("  снято: %-26s %.1f с%s" % (sc["name"], time.time() - t0, ("  ОШИБКИ JS: " + str(res[sc["name"]]["errors"])) if res[sc["name"]]["errors"] else ""))
+        csp_fails = csp_check(browser, a.site, a.lang) if not a.only else 0
         browser.close()
     if a.out:
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1, sort_keys=True)
         print("записано:", a.out)
-    fails = 0
+    fails = csp_fails
     js_errs = [(k, v["errors"]) for k, v in res.items() if v["errors"]]
     if js_errs:
         print("ОШИБКИ JS на странице:", js_errs)
