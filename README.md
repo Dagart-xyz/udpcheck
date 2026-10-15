@@ -30,7 +30,7 @@ Details: [PROTOCOL.md](PROTOCOL.md). One-line node install: `curl -fsSL https://
 | `udpcheck_v2.py` | hub and the target role |
 | `udpcheck_node.py` | node agent |
 | `installer/`, `build_site.py`, `siteparts/` | agent installer, building `site/` (page template and texts in two languages) |
-| `site/` | built pages (`/`, `/en/`), diagnostics script, protocol documentation |
+| `site/` | built pages (`/`, `/en/`), signed agent installer, protocol documentation |
 | `ops/` | server-side scripts: backups, GeoIP updates, watcher and alerts, hardening, tarpit for robots |
 | `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | licence, third-party data, privacy principles, vulnerabilities, how to help |
 | `docs/SELF-HOSTING.md` | how to run your own hub, anchor servers and nodes |
