@@ -33,8 +33,7 @@
 (site_static) {
 	root * /var/www/udpcheck-site
 	header {
-		# страницу браузер каждый раз сверяет с сервером (иначе у посетителей остаётся старая версия); картинки кэшируются ниже
-		Cache-Control no-cache
+		# откуда странице можно грузить код, стили и данные (только с нашего адреса)
 		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 	}
 	rewrite /i /install-node.sh
@@ -51,8 +50,11 @@
 	rewrite @prov /{re.prov.1}index.html
 	@sh path /install-node.sh /install-node.en.sh /i /en/i
 	header @sh Content-Type "text/plain; charset=utf-8"
-	@static path /logos/*
+	@static path /logos/* /favicon.ico /favicon.svg /apple-touch-icon.png
 	header @static Cache-Control "public, max-age=86400"
+	# страницы браузер каждый раз сверяет с сервером (иначе у посетителей остаётся старая версия); логотипы и значки кэшируются (выше)
+	@nocache not path /logos/* /favicon.ico /favicon.svg /apple-touch-icon.png
+	header @nocache Cache-Control no-cache
 	file_server
 }
 
@@ -96,7 +98,7 @@ dagart.xyz {
 	# Заголовок X-Probe убираем у всех, кроме правила выше: его ставит только Caddy.
 	@claimedbot {
 		header_regexp ua User-Agent (?i)(googlebot|adsbot-google|googleother|google-inspectiontool|bingbot|msnbot|bingpreview|yandex[.]com/bots|applebot)
-		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/*
+		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/* /favicon.ico /favicon.svg /apple-touch-icon.png /*.txt
 	}
 	handle @claimedbot {
 		reverse_proxy 127.0.0.1:18081 {
@@ -126,7 +128,7 @@ dagart.xyz {
 		not header User-Agent *Embedly*
 		not header User-Agent *Pinterest*
 		not header User-Agent *LinkedIn*
-		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/*
+		not path /i /en/i /install-node.sh /install-node.sh.sig /install-node.en.sh /install-node.en.sh.sig /node/* /protocol.txt /robots.txt /sitemap.xml /.well-known/* /logos/* /favicon.ico /favicon.svg /apple-touch-icon.png /*.txt
 	}
 	handle @robotish {
 		reverse_proxy 127.0.0.1:18081 {

@@ -19,6 +19,8 @@ for f in index.html en/index.html; do
   rm -f "$TMP"
 done
 for f in privacy.html terms.html en/privacy.html en/terms.html robots.txt sitemap.xml; do [ -f "site/$f" ] && put "site/$f" "$f"; done
+# значки сайта (ops/make_favicon.py) и файл ключа IndexNow (site/<ключ>.txt, ops/indexnow.py)
+for f in favicon.ico favicon.svg apple-touch-icon.png $(cd site && ls | grep -E '^[0-9a-f]{32}\.txt$'); do [ -f "site/$f" ] && put "site/$f" "$f"; done
 # установщик и агент с подписями (их создаёт build_site.py)
 for f in install-node.sh install-node.sh.sig install-node.en.sh install-node.en.sh.sig node/udpcheck_node.py node/udpcheck_node.py.sig node/udpcheck_node.py.sha256; do [ -f "site/$f" ] && put "site/$f" "$f"; done
 echo "страницы выложены, версия $B"

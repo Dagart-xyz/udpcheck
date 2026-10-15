@@ -44,6 +44,12 @@ def render_index(lang):
                  ("@@ALTLANG@@", "en" if ru else "ru"), ("@@ORIGIN@@", ORIGIN), ("@@OGLOCALE@@", "ru_RU" if ru else "en_US")):
         out = out.replace(k, v)
     out = out.replace("@@LANGMENU@@", lang_menu(lang, html["langsw_title"]))
+    # разметка schema.org для поисковиков: что это за сайт (бесплатное веб-приложение), язык и адрес
+    ld = {"@context": "https://schema.org", "@type": "WebApplication", "name": "UDPcheck", "url": ORIGIN + ("/" if ru else "/en/"), "inLanguage": lang,
+          "description": html["meta_desc"], "applicationCategory": "UtilitiesApplication", "operatingSystem": "Any", "isAccessibleForFree": True,
+          "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+          "codeRepository": "https://github.com/Dagart-xyz/udpcheck"}
+    out = out.replace("@@JSONLD@@", '<script type="application/ld+json">' + json.dumps(ld, ensure_ascii=False).replace("</", r"<\/") + "</script>")
     assert "@@" not in out and not re.search(r"@\{\w+\}", out), "в странице остались неподставленные метки"
     return out
 
