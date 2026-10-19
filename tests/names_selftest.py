@@ -3,6 +3,7 @@
 """Проверка очистки названий провайдеров и группировки сетей одного оператора на живых именах из базы хаба. Запуск: python tests/names_selftest.py"""
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -56,6 +57,7 @@ cases = {
     "Joint-Stock Company Investpribor": "Investpribor",
     "SkyNet Ltd.": "SkyNet",
     "Seven Sky": "Seven Sky",
+    "AO Teleradiocompany Odintsovo": "Teleradiocompany Odintsovo",
 }
 for raw, want in cases.items():
     got = cn(raw)
@@ -79,12 +81,15 @@ check("ЭР-Телеком: разные сети под одним брендо
 check("Вымпелком PJSC и OJSC вместе", g(16345, 'PJSC "Vimpelcom"')[0] == g(8402, 'OJSC "Vimpelcom"')[0])
 check("МТС и «MTS Belgorod branch» вместе", g(8359, "MTS PJSC")[0] == g(197023, "MTS Belgorod branch")[0] and g(8359, "MTS PJSC")[1] == "МТС")
 check("МегаФон отдельно от МТС", g(31213, "PJSC MegaFon")[0] != g(8359, "MTS PJSC")[0])
+check("ЭР-Телеком слитно и дефисом тоже Дом.ру", "Дом.ру" in g(41733, "ERTELECOM-AS")[1] and "Дом.ру" in g(41733, "ER-TELECOM-HOLDING")[1])
+check("«Sever Telecom» не ЭР-Телеком (шаблон не ловит часть слова)", "Дом.ру" not in g(29124, "Sever Telecom JSC")[1], g(29124, "Sever Telecom JSC"))
 check("SkyNet и Seven Sky не склеиваются", g(35807, "SkyNet Ltd.")[0] != g(29124, "Seven Sky")[0])
 check("частное лицо: публично имени нет, имя «Частный провайдер»", g(196949, "Natalia Sergeevna Filicheva")[1].startswith("Частный провайдер") and V.public_org(35420, "Individual Entrepreneur Lukyanov Maksim") is None)
 check("обычная организация показывается", V.public_org(35807, "SkyNet Ltd.") == "SkyNet Ltd.")
 
 print("[физические лица в организации]")
 for t, want in (("Alexey Geiner", True), ("Paul Sagov", True), ("Иван Петров", True), ("Tabunscic Anatoli", True), ("Baykov Ilya Sergeevich", True),
+                ("PE Ivanova Maria", True), ("IP Petrov Ivan", True), ("PE Telecom Service", False), ("PE Kvant", False),
                 ("Home Internet", False), ("Orange Business Services", False), ("Microsoft Corporation", False), ("Hurricane Electric", False),
                 ("Digital Ocean", False), ("Owl Limited", False), ("PJSC MegaFon", False), ("Cloudflare", False), ("Telecommunication Business", False)):
     check("похоже на человека? %s -> %s" % (t, want), V.looks_like_person_org(t) == want)
@@ -98,6 +103,8 @@ check("обычная организация показывается", V.public
 check("в разборе: сокращения (OBIT, НИИСИ РАН) не тревожат", not V._name_flags("OBIT") and not V._name_flags("НИИСИ РАН"))
 check("в разборе: русское название без английского помечается, со словарным нет", any("английского" in x for x in V._name_flags("Новый Оператор")) and not any("английского" in x for x in V._name_flags("Ростелеком")))
 check("в разборе: «(^ ^)» и «==Vodocomfort==» помечаются", bool(V._name_flags("(^ ^)")) and bool(V._name_flags("==Vodocomfort==")))
+check("в разборе: скобка в конце названия не «странные символы»", not any("странные" in f for n in ("Дом.ру (ЭР-Телеком)", "Selectel (Москва)", "Т2 (Tele2)", "Образовательный центр (AS25100)") for f in V._name_flags(n)))
+check("в разборе: непарные и лишние скобки помечаются", all(any("странные" in f for f in V._name_flags(n)) for n in ("Имя (", "Имя)", ")Имя", "(Имя")))
 check("в разборе: имя человека в организации помечается", any("человека" in f for f in V._name_flags("Astra VPS", 204161)))
 check("в базу вместо имени человека кладётся «Частное лицо»", V._store_org("Alexey Geiner") == "Частное лицо" and V._store_org("Microsoft Corporation") == "Microsoft Corporation" and V._store_org(None) is None)
 check("«Частное лицо» дальше распознаётся как частное лицо", V.provider_name(204161, "Частное лицо") == "Частный провайдер AS204161")
@@ -110,8 +117,19 @@ shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ops"
 V._names_en["mtime"] = 0
 print("[английские названия]")
 for ru, en in (("Ростелеком", "Rostelecom"), ("МегаФон", "MegaFon"), ("Билайн (ВымпелКом)", "Beeline (VimpelCom)"), ("Частный провайдер AS196949", "Private provider AS196949"),
-               ("Seven Sky", "Seven Sky"), ("Новый Оператор", "Novyy Operator"), ("Москва", "Moskva"), ("Щёлково", "Shchelkovo")):
+               ("A1 (Беларусь)", "A1 (Belarus)"), ("ТРК Одинцово", "TRK Odintsovo"), ("Seven Sky", "Seven Sky"), ("Новый Оператор", "Novyy Operator"), ("Москва", "Moskva"), ("Щёлково", "Shchelkovo")):
     check("название по-английски: %s -> %s" % (ru, en), V.en_name(ru) == en, V.en_name(ru))
+
+print("[словари в ops/]")
+OPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ops")
+ops_names = json.load(open(os.path.join(OPS, "names.json"), encoding="utf-8"))
+ops_en = json.load(open(os.path.join(OPS, "names_en.json"), encoding="utf-8"))
+no_en = [n for n in ops_names.values() if re.search(r"[А-Яа-яЁё]", n) and not n.startswith("Частный провайдер") and n not in ops_en]
+check("у каждого русского названия из names.json есть английское", not no_en, no_en)
+bad_flags = {a: V._name_flags(n) for a, n in ops_names.items() if V._name_flags(n)}
+check("названия из names.json не вызывают пометок в разборе", not bad_flags, bad_flags)
+kinds = json.load(open(os.path.join(OPS, "provider_kinds.json"), encoding="utf-8"))
+check("в provider_kinds.json только hosting/isp", set(kinds.values()) <= {"hosting", "isp"}, set(kinds.values()))
 
 print()
 print("ИТОГ: всё прошло" if not FAILS else "ИТОГ: ПРОВАЛЕНО %d" % len(FAILS))

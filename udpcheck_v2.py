@@ -1300,7 +1300,7 @@ _gmap = {"t": 0, "key": {}, "members": {}}
 LEGAL_PHRASES = re.compile(r"(?i)public\s+joint[\s-]*stock\s+company|open\s+joint[\s-]*stock\s+company|closed\s+joint[\s-]*stock\s+company|"
                            r"joint[\s-]*stock\s+company|limited\s+liability\s+company|limited\s+liability\s+partnership|"
                            r"sabiedriba\s+ar\s+ierobezotu\s+atbildibu|\bbranch\b")
-LEGAL_TOKENS = {"pjsc", "ojsc", "cjsc", "jsc", "llc", "ooo", "oao", "zao", "pao", "ltd", "limited", "inc", "corp", "srl", "sarl", "gmbh", "bv", "ou", "oü",
+LEGAL_TOKENS = {"pjsc", "ojsc", "cjsc", "jsc", "llc", "ooo", "oao", "zao", "pao", "ao", "ltd", "limited", "inc", "corp", "srl", "sarl", "gmbh", "bv", "ou", "oü",
                 "sia", "llp", "fzco", "sas", "plc", "co", "sa", "spa", "ab", "the", "sl", "sro", "kft", "oy"}
 GENERIC_NAMES = {"retail", "hosting services", "uplinks", "telecommunication business", "customer", "customers", "internet", "network", "networks",
                  "telecom", "hosting", "cloud", "isp", "datacenter", "data center", "transit", "backbone", "default", "services", "service"}
@@ -1325,7 +1325,7 @@ _PERSON_WORD = re.compile(r"[A-Z][a-z]{1,20}(-[A-Z][a-z]{1,20})?|[А-ЯЁ][а-я
 
 
 def looks_like_person_org(text):
-    t = str(text or "").strip()
+    t = re.sub(r"^(?:PE|IP)\s+", "", str(text or "").strip())     # «PE Фамилия Имя»: частный предприниматель (ИП), решают остальные слова
     if not t or re.search(r"[\d@/_&.,:;()\"'«»+=]", t):
         return False
     words = t.split()
@@ -2060,7 +2060,8 @@ def _name_flags(name, asn=None):
         f.append("длинное название")
     if any(len(w) >= 6 and w.isalpha() and w.isupper() for w in name.split()):
         f.append("осталось капсом")
-    if re.search(r"[^\w\s.\-&()'+]", name) or name.strip("()^ =-") != name:
+    # мусор по краям («(^ ^)», «==Имя==») или непарные скобки; закрывающая скобка в конце — норма: «Selectel (Москва)»
+    if re.search(r"[^\w\s.\-&()'+]", name) or name.strip("(^ =-") != name or name.startswith(")") or name.count("(") != name.count(")"):
         f.append("странные символы")
     if re.search(r"[А-Яа-яЁё]", name) and not name.startswith("Частный провайдер"):
         en_name(name)                                      # загрузить словарь английских названий
@@ -2105,13 +2106,16 @@ _site = {"mtime": 0, "build": ""}
 
 
 def site_build():
-    """Метка версии страницы (BUILD в index.html): открытая вкладка сверяет её и предлагает обновиться."""
+    """Метка версии страницы в index.html: открытая вкладка сверяет её и предлагает обновиться.
+    С 15.10 метка лежит в <meta name="udpc-build" content="...">, раньше была var BUILD = "..."; невыложенная (__BUILD__) не считается."""
     f = os.path.join(os.environ.get("UDPCHECK_SITE_DIR", "/var/www/udpcheck-site"), "index.html")
     try:
         mt = os.stat(f).st_mtime
         if mt != _site["mtime"]:
-            m = re.search(r'var BUILD = "([^"]{1,40})"', open(f, encoding="utf-8").read())
-            _site.update(mtime=mt, build=m.group(1) if m else "")
+            html = open(f, encoding="utf-8").read()
+            m = re.search(r'<meta name="udpc-build" content="([^"]{1,40})"', html) or re.search(r'var BUILD = "([^"]{1,40})"', html)
+            b = m.group(1) if m else ""
+            _site.update(mtime=mt, build="" if b.startswith("__") else b)
     except OSError:
         pass
     return _site["build"]

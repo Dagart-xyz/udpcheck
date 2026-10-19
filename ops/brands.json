@@ -9,10 +9,8 @@
  {
   "name": "Дом.ру (ЭР-Телеком)",
   "match": [
-   "er-telecom",
-   "er telecom",
-   "ertelecom",
-   "эр-телеком"
+   "\\ber[- ]?telecom",
+   "\\bэр-телеком"
   ]
  },
  {

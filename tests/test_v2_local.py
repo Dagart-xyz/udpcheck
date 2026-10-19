@@ -72,6 +72,23 @@ V.S = _ty.SimpleNamespace(GEO_DIR=_cd)
 check("город: Helsinki -> Хельсинки по справочнику", V.city_ru("FI", "Helsinki") == "Хельсинки")
 check("город: нет в справочнике (мелкое место) остаётся как есть, пусто остаётся пустым", V.city_ru("NL", "Eygelshoven") == "Eygelshoven" and V.city_ru("FI", None) is None)
 
+# метка сборки страницы для /api/v2/version: открытая вкладка сверяет её и предлагает обновиться
+_sd = tempfile.mkdtemp(prefix="udpc_site_")
+os.environ["UDPCHECK_SITE_DIR"] = _sd
+
+
+def _build_of(html):
+    with open(os.path.join(_sd, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(html)
+    V._site.update(mtime=0, build="")
+    return V.site_build()
+
+
+check("метка сборки из <meta name=\"udpc-build\"> (формат с 15.10)", _build_of('<head><meta name="udpc-build" content="20261019-101500"></head>') == "20261019-101500")
+check("метка сборки в старом формате var BUILD тоже читается", _build_of('<script>var BUILD = "20261001-120000";</script>') == "20261001-120000")
+check("невыложенная страница (__BUILD__) и страница без метки дают пустую метку", _build_of('<meta name="udpc-build" content="__BUILD__">') == "" and _build_of("<p>нет метки</p>") == "")
+del os.environ["UDPCHECK_SITE_DIR"]
+
 def V_kind_ok(byasn):
     return (byasn.get(64505, {}).get("kind") == "hosting" and byasn.get(64502, {}).get("kind") == "isp"
             and byasn.get(64503, {}).get("kind") == "isp" and byasn.get(64500, {}).get("kind") == "isp")
