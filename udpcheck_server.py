@@ -62,6 +62,7 @@ for _it in _env_list("UDPCHECK_PAD_PORTS", "3478:600,19302:1200"):
     except ValueError:
         pass
 PAD_BOUND = {}      # порты, которые удалось занять: порт -> длина ответа
+ON_429 = None       # хаб ставит сюда функцию (запрос) -> None: обезличенный счётчик ответов «слишком часто» по имени запроса
 PREFIX = os.environ.get("UDPCHECK_PREFIX", "/udpcheck")
 # Заголовку X-Forwarded-For верим только от этих адресов (Caddy на этой же машине).
 TRUSTED_PROXIES = set(_env_list("UDPCHECK_TRUSTED_PROXIES", "127.0.0.1,::1"))
@@ -660,6 +661,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def err(self, code, msg, retry=None):
         self.close_connection = True   # в запросе мог остаться непрочитанный body
+        if code == 429 and ON_429 is not None:
+            try:
+                ON_429(self)
+            except Exception:
+                pass
         self.send_json(code, {"error": msg}, {"Retry-After": str(retry)} if retry else None)
 
     def body_len(self):

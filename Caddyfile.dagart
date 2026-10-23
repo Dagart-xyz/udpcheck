@@ -147,6 +147,19 @@ dagart.xyz {
 	}
 }
 
+# www.dagart.xyz: только постоянная переадресация на основной адрес. Поисковики склеивают оба адреса, а старая заглушка регистратора
+# («Coming Soon» на www) уходит из выдачи. Нужна запись www в DNS (A на адрес хаба или CNAME на dagart.xyz); сертификат Caddy получит сам.
+www.dagart.xyz {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	redir https://dagart.xyz{uri} permanent
+	log {
+		output discard
+	}
+}
+
 # Внутренний адрес сайта для замедлителя роботов: слушает только локальный интерфейс, любой Host (замедлитель передаёт исходный)
 http://:18082 {
 	bind 127.0.0.1

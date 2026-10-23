@@ -269,6 +269,12 @@ def names_digest(st):
             pass
 
 
+# что означают имена запросов в счётчике ответов 429 (хаб отдаёт их как rate_limited в /api/v2/stats/site)
+RL_WHY = {"web/trace": "повторная трассировка раньше 5 минут", "web/report": "результат в статистику чаще 6 раз в час", "web/stun": "проверка UDP из браузера",
+          "web/me": "данные о посетителе", "web/stunseen": "подтверждение пакетов", "providers": "список провайдеров", "providers/*": "страница провайдера",
+          "journal": "журнал", "nodes": "узлы и опорные серверы", "stats/asn": "график провайдера", "health": "состояние хаба", "node/register": "регистрация узла"}
+
+
 def site_digest(st):
     """Раз в сутки в SITE_HOUR по Москве: итоги вчерашнего дня с хаба (заходы, браузеры, нажатия «Проверить», ответы не успехом) и среднее за неделю до этого."""
     t = now()
@@ -285,10 +291,23 @@ def site_digest(st):
     prev = [v for d, v in sorted(rows.items(), reverse=True) if d < y and v.get("browsers")][:7]          # только дни, когда счёт уже шёл
     avg = (sum(v["browsers"] for v in prev) // len(prev)) if prev else None
     why = {"400": "плохой запрос", "403": "запрещено", "404": "не найдено, в основном сканеры", "405": "метод", "429": "лимит частоты", "499": "клиент оборвал соединение", "500": "ошибка", "502": "хаб недоступен", "503": "сервис занят", "504": "хаб не ответил"}
-    errs = ", ".join("%s%s: %d" % (c, (" (" + why[c] + ")") if c in why else "", n) for c, n in sorted(r["http_errors"].items(), key=lambda x: -x[1])[:4]) or "нет"
-    text = ("Сайт за %s.%s: загрузок страницы %d, разных браузеров %d%s. Нажали «Проверить»: %d браузеров (проверок в статистике %d). "
-            "Ответы сервера не успехом (код: сколько): %s." % (y[8:10], y[5:7], r["views"], r["browsers"],
-                                                               (" (в среднем за прошлые дни %d)" % avg) if avg is not None else "", r["check_browsers"], r["checks"], errs))
+    nl = chr(10)
+    errs = sorted(r["http_errors"].items(), key=lambda x: -x[1])[:5]
+    rl = sorted((r.get("rate_limited") or {}).items(), key=lambda x: (-x[1], x[0]))[:5]
+    lines = ["Сайт за %s.%s" % (y[8:10], y[5:7]),
+             "• Загрузок страницы: %d" % r["views"],
+             "• Разных браузеров: %d%s" % (r["browsers"], (" (в среднем за прошлые дни %d)" % avg) if avg is not None else ""),
+             "• Нажали «Проверить»: браузеров %d, проверок в статистике %d" % (r["check_browsers"], r["checks"]),
+             "Ответы не успехом:"]
+    lines += ["• %s%s: %d" % (c, (" (" + why[c] + ")") if c in why else "", n) for c, n in errs] or ["• нет"]
+    if rl:
+        lines.append("429 по запросам:")
+        lines += ["• %s%s: %d" % (k, (" (" + RL_WHY[k] + ")") if k in RL_WHY else "", n) for k, n in rl]
+        # остаток общего числа 429 (его считает Caddy) отдаёт замедлитель роботов ops/udpcheck-tarpit.py: люди с браузером к нему не попадают
+        tarpit = r["http_errors"].get("429", 0) - sum((r.get("rate_limited") or {}).values())
+        if tarpit > 0:
+            lines.append("• замедлитель роботов (много медленных запросов сразу с одного адреса): %d" % tarpit)
+    text = nl.join(lines)
     if deliver(text):
         st["site_day"] = day
 

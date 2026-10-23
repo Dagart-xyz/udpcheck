@@ -26,7 +26,8 @@ PY
 mkdir -p "$W/files"
 cp -a /etc/udpcheck "$W/files/etc-udpcheck"
 rm -f "$W/files/etc-udpcheck/backup.env" "$W/files/etc-udpcheck/backup.pass"      # ключи доступа к копиям и пароль в саму копию не кладём
-for f in overrides names brands provider_kinds; do cp -a "/opt/udpcheck/geo/$f.json" "$W/files/" 2>/dev/null || true; done
+for f in overrides names names_en brands provider_kinds; do cp -a "/opt/udpcheck/geo/$f.json" "$W/files/" 2>/dev/null || true; done
+cp -a /opt/udpcheck/geo/cities_ru.sqlite "$W/files/" 2>/dev/null || true      # русские названия городов: хаб открывает только на чтение, собирать заново долго
 cp -a /var/www/udpcheck-site "$W/files/site"
 cp -a /etc/caddy/Caddyfile "$W/files/"
 cp -a /etc/systemd/system/udpcheck.service /etc/systemd/system/udpcheck.service.d "$W/files/" 2>/dev/null || true

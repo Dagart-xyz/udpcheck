@@ -17,6 +17,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
+sys.path.insert(0, ROOT)
+import udpcheck_v2 as V
 fails = 0
 
 
@@ -98,6 +100,12 @@ def today_row(j):
     return {}
 
 
+# имя запроса для счётчика 429: без номеров, токенов и адресов, только известные части пути
+for path, want in (("/udpcheck/api/v2/providers/12345?x=1", "providers/*"), ("/api/v2/providers", "providers"), ("/api/v2/web/trace", "web/trace"),
+                   ("/api/v2/web/trace/" + "ab" * 16, "web/trace"), ("/api/v2/web/stunseen/tok-123", "web/stunseen"), ("/api/v2/stats/asn/8359", "stats/asn"),
+                   ("/etc/passwd", "other"), ("/api/v2/%3Cscript%3E", "other"), ("/api/v2/", "other")):
+    check("имя запроса для 429: %s -> %s" % (path, want), V._rl_group(path) == want, V._rl_group(path))
+
 C1, C2 = "1" * 32, "2" * 32
 proc = start()
 try:
@@ -135,6 +143,12 @@ try:
     st, j = stats()
     check("пустые счётчики не ломают итоги", st == 200 and today_row(j)["http_errors"].get("404") == 17, j)
 
+    # ответы 429 самого хаба считаются по имени запроса: часто дёргаем журнал (лимит 60 в минуту на адрес)
+    got429 = sum(1 for _ in range(70) if req("/api/v2/journal")[0] == 429)
+    st, j = stats()
+    check("429 хаба по запросам: только journal и ровно столько, сколько получил клиент (%d)" % got429,
+          got429 > 0 and today_row(j).get("rate_limited") == {"journal": got429}, today_row(j).get("rate_limited"))
+
     # перезапуск хаба: накопленное в базе, число браузеров за сутки не уменьшается
     proc.terminate()
     proc.wait(timeout=5)
@@ -151,7 +165,7 @@ try:
     db = sqlite3.connect(os.path.join(tmp, "hub.db"), timeout=10)
     rows = db.execute("SELECT day, k, n FROM sitestats").fetchall()
     keys = {k for _, k, _ in rows}
-    check("в таблице sitestats только известные ключи и числа", keys <= {"views", "browsers", "starts", "http:404", "http:429"}, keys)
+    check("в таблице sitestats только известные ключи и числа", keys <= {"views", "browsers", "starts", "http:404", "http:429", "rl:journal"}, keys)
     dump = json.dumps(rows)
     check("номеров браузеров и их хэшей в базе нет", C1 not in dump and C2 not in dump and "127.0.0.1" not in dump, dump)
 
@@ -159,7 +173,7 @@ try:
     y = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600 - 86400))
     y2 = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600 - 2 * 86400))
     for d, v, b, s_, e in ((y, 150, 98, 74, 530), (y2, 100, 60, 40, 10)):
-        for k, n in (("views", v), ("browsers", b), ("starts", s_), ("http:404", e)):
+        for k, n in (("views", v), ("browsers", b), ("starts", s_), ("http:404", e), ("http:429", 75), ("rl:providers", 40), ("rl:web/trace", 12), ("rl:web/stun", 9)):
             db.execute("INSERT OR REPLACE INTO sitestats(day, k, n) VALUES(?,?,?)", (d, k, n))
     db.execute("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)", (int(time.time()) - 86400, 777, "NO_BLOCK", "[]", "X", "d" * 16))
     db.commit()
@@ -174,8 +188,15 @@ try:
     out = watch(14)
     check("днём (14:00) сводка сайта не приходит", "Сайт за" not in out, out)
     out = watch(9)
-    check("утром (09:00) приходит сводка за вчера с числами", "Сайт за" in out and "загрузок страницы 150" in out and "разных браузеров 98" in out and "(в среднем за прошлые дни 60)" in out
-          and "404 (не найдено, в основном сканеры): 530" in out, out)
+    check("утром (09:00) приходит сводка за вчера с числами", "Сайт за" in out and "• Загрузок страницы: 150" in out and "• Разных браузеров: 98 (в среднем за прошлые дни 60)" in out
+          and "• 404 (не найдено, в основном сканеры): 530" in out, out)
+    check("сводка читается по строкам: каждое число на своей строке", out.count(chr(10) + "• ") >= 8 and (chr(10) + "Ответы не успехом:" + chr(10)) in out, out)
+    check("в сводке разбивка лимита частоты по запросам с пояснениями, по убыванию",
+          (chr(10) + "429 по запросам:" + chr(10) + "• web/trace (повторная трассировка раньше 5 минут): 12" + chr(10)) not in out
+          and out.find("• providers (список провайдеров): 40") < out.find("• web/trace (повторная трассировка раньше 5 минут): 12") < out.find("• web/stun (проверка UDP из браузера): 9")
+          and out.find("• providers (список провайдеров): 40") > out.find("429 по запросам:") > 0, out)
+    check("в сводке остаток 429 приписан замедлителю роботов (75 - 61 = 14), после списка запросов хаба",
+          out.find("• замедлитель роботов (много медленных запросов сразу с одного адреса): 14") > out.find("• web/stun (проверка UDP из браузера): 9") > 0, out)
     out = watch(10)
     check("в тот же день повторно сводка не приходит", "Сайт за" not in out, out)
     out = watch(9) if False else out

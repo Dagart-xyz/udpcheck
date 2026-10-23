@@ -697,6 +697,7 @@ def init(server_module):
         rl_ref = S.RateLimiter(20, 3600)
         rl_seen = S.RateLimiter(20, 3600)
         rl_seen_ip = S.RateLimiter(200, 3600)
+        S.ON_429 = _count_429
     if TARGET_ENABLED:
         threading.Thread(target=reporter_loop, daemon=True).start()
         threading.Thread(target=trace_poller_loop, daemon=True).start()
@@ -1301,7 +1302,8 @@ LEGAL_PHRASES = re.compile(r"(?i)public\s+joint[\s-]*stock\s+company|open\s+join
                            r"joint[\s-]*stock\s+company|limited\s+liability\s+company|limited\s+liability\s+partnership|"
                            r"sabiedriba\s+ar\s+ierobezotu\s+atbildibu|\bbranch\b")
 LEGAL_TOKENS = {"pjsc", "ojsc", "cjsc", "jsc", "llc", "ooo", "oao", "zao", "pao", "ao", "ltd", "limited", "inc", "corp", "srl", "sarl", "gmbh", "bv", "ou", "oü",
-                "sia", "llp", "fzco", "sas", "plc", "co", "sa", "spa", "ab", "the", "sl", "sro", "kft", "oy"}
+                "sia", "llp", "fzco", "sas", "plc", "co", "sa", "spa", "ab", "the", "sl", "sro", "kft", "oy",
+                "aktsiaselts", "too", "uab", "mb"}                                   # Эстония (AS), Казахстан (ТОО), Литва (UAB, MB)
 GENERIC_NAMES = {"retail", "hosting services", "uplinks", "telecommunication business", "customer", "customers", "internet", "network", "networks",
                  "telecom", "hosting", "cloud", "isp", "datacenter", "data center", "transit", "backbone", "default", "services", "service"}
 PERSON_RE = re.compile(r"(?i)individual\s+entrepreneur|sole\s+proprietor|private\s+person|^ie\s|^ип\s|индивидуальный\s+предприниматель|частное\s+лицо|"
@@ -1326,6 +1328,7 @@ _PERSON_WORD = re.compile(r"[A-Z][a-z]{1,20}(-[A-Z][a-z]{1,20})?|[А-ЯЁ][а-я
 
 def looks_like_person_org(text):
     t = re.sub(r"^(?:PE|IP)\s+", "", str(text or "").strip())     # «PE Фамилия Имя»: частный предприниматель (ИП), решают остальные слова
+    t = re.sub(r"(?<![\w.])[A-ZА-ЯЁ]\.(?=\s)\s*", "", t)            # инициал отчества: «Ivan P. Sidorov» -> «Ivan Sidorov»
     if not t or re.search(r"[\d@/_&.,:;()\"'«»+=]", t):
         return False
     words = t.split()
@@ -1882,7 +1885,8 @@ def _db_writable():
 # ---- обезличенные счётчики сайта --------------------------------------------------------------------------------------------------------------
 # Что считаем: сколько раз загружена страница (запрос списка провайдеров делает JS страницы), сколько нажатий «Проверить» (запуск трассировки), сколько разных
 # браузеров за сутки (хэш «суточная соль + случайный номер браузера», сам номер и хэш на диск не пишутся, в базе только число) и сколько запросов Caddy
-# ответил не успехом (404 от сканеров, 429, 5xx). Адресов, заголовков и путей нет. Сутки по Москве. Смотреть: GET /api/v2/stats/site (с секретом наблюдателя).
+# ответил не успехом (404 от сканеров, 429, 5xx), а ответы 429 самого хаба ещё и по имени запроса («providers/*», «web/trace»: без номеров, токенов и адресов).
+# Адресов, заголовков и полных путей нет. Сутки по Москве. Смотреть: GET /api/v2/stats/site (с секретом наблюдателя).
 SITE_CNT = {}                                  # (сутки, ключ) -> сколько прибавить к базе
 SITE_UNIQ = {"day": "", "set": set()}
 SITE_STATE = {"flush": 0.0, "caddy": 0.0}
@@ -1892,6 +1896,23 @@ SITE_UNIQ_MAX = 100000
 
 def _msk_day(t=None):
     return time.strftime("%Y-%m-%d", time.gmtime((time.time() if t is None else t) + 3 * 3600))
+
+
+def _rl_group(path):
+    """Обезличенное имя запроса для счётчика ответов 429: начало пути после /api/v2/ без номеров и токенов. «providers/12345» -> «providers/*»,
+    «web/trace/<id>» -> «web/trace», чужое или странное -> «other». Набор имён ограничен адресами, на которые хаб вообще отвечает 429."""
+    p = str(path or "").split("?", 1)[0]
+    i = p.find("/api/v2/")
+    segs = [x for x in p[i + 8:].split("/") if x] if i >= 0 else []
+    if not segs or not re.fullmatch(r"[a-z]{1,16}", segs[0]):
+        return "other"
+    if segs[0] in ("web", "stats", "node", "target", "names", "health") and len(segs) > 1:
+        return segs[0] + "/" + (segs[1] if re.fullmatch(r"[a-z]{1,16}", segs[1]) else "*")
+    return segs[0] + ("/*" if len(segs) > 1 else "")
+
+
+def _count_429(h):
+    site_count("rl:" + _rl_group(getattr(h, "path", "")))
 
 
 def site_count(key, h=None, n=1):
@@ -1983,7 +2004,8 @@ def stats_site(h, ip):
         v = out[d]
         res.append({"day": d, "views": v.get("views", 0), "browsers": v.get("browsers", 0), "starts": v.get("starts", 0),
                     "checks": v.get("checks", 0), "check_browsers": v.get("check_browsers", 0),
-                    "http_errors": {k[5:]: n for k, n in v.items() if k.startswith("http:") and k[5] not in "23"}})
+                    "http_errors": {k[5:]: n for k, n in v.items() if k.startswith("http:") and k[5] not in "23"},
+                    "rate_limited": {k[3:]: n for k, n in v.items() if k.startswith("rl:")}})
     return h.send_json(200, {"days": res, "today": _msk_day(today)})
 
 

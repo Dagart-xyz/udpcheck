@@ -58,6 +58,10 @@ cases = {
     "SkyNet Ltd.": "SkyNet",
     "Seven Sky": "Seven Sky",
     "AO Teleradiocompany Odintsovo": "Teleradiocompany Odintsovo",
+    "Aktsiaselts WaveCom": "WaveCom",
+    "Melbikomas UAB": "Melbikomas",
+    "Serverio technologijos MB": "Serverio technologijos",
+    "TOO Kaspi Net": "Kaspi Net",
 }
 for raw, want in cases.items():
     got = cn(raw)
@@ -90,6 +94,7 @@ check("обычная организация показывается", V.public
 print("[физические лица в организации]")
 for t, want in (("Alexey Geiner", True), ("Paul Sagov", True), ("Иван Петров", True), ("Tabunscic Anatoli", True), ("Baykov Ilya Sergeevich", True),
                 ("PE Ivanova Maria", True), ("IP Petrov Ivan", True), ("PE Telecom Service", False), ("PE Kvant", False),
+                ("Ivan P. Sidorov", True), ("P.A.K.T", False), ("Serv.Host Group", False),
                 ("Home Internet", False), ("Orange Business Services", False), ("Microsoft Corporation", False), ("Hurricane Electric", False),
                 ("Digital Ocean", False), ("Owl Limited", False), ("PJSC MegaFon", False), ("Cloudflare", False), ("Telecommunication Business", False)):
     check("похоже на человека? %s -> %s" % (t, want), V.looks_like_person_org(t) == want)
