@@ -34,6 +34,7 @@ Details: [PROTOCOL.md](PROTOCOL.md). One-line node install: `curl -fsSL https://
 | `ops/` | server-side scripts: backups, GeoIP updates, watcher and alerts, hardening, tarpit for robots |
 | `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | licence, third-party data, privacy principles, vulnerabilities, how to help |
 | `docs/SELF-HOSTING.md` | how to run your own hub, anchor servers and nodes |
+| `CHANGELOG.md` | what changed in the project, by month (in Russian) |
 | `tests/` | tests |
 | `add_target.py`, `add_logo.py` | connecting an anchor server, a provider logo |
 
@@ -48,6 +49,8 @@ python tests/names_selftest.py
 python tests/test_s3_local.py
 python tests/fuzz_local.py
 python tests/test_tarpit_local.py
+python tests/test_sitestats_local.py
+python tests/test_agent_i18n.py
 sh tests/i18n/run.sh          # the interface in Russian and English (needs Docker)
 ```
 

@@ -33,9 +33,10 @@
 | `udpcheck_node.py` | агент узла |
 | `installer/`, `build_site.py`, `siteparts/` | установщик агента, сборка `site/` (шаблон страницы и тексты на двух языках) |
 | `site/` | страница, подписанный установщик агента, документация протокола |
-| `ops/` | скрипты для сервера: резервные копии, обновление баз GeoIP, оповещения |
+| `ops/` | скрипты для сервера: резервные копии, обновление баз GeoIP, наблюдатель и оповещения, защита сервера, замедлитель роботов |
 | `LICENSE`, `NOTICE`, `PRIVACY-PRINCIPLES.md`, `SECURITY.md`, `CONTRIBUTING.md` | лицензия, сторонние данные, принципы приватности, уязвимости, как помочь |
 | `docs/SELF-HOSTING.md` | как запустить свой хаб, опорные серверы и узлы |
+| `CHANGELOG.md` | что менялось в проекте, по месяцам |
 | `tests/` | тесты (запуск: `python tests/test_v2_local.py` и остальные `test_*.py`) |
 | `add_target.py`, `add_logo.py` | подключение опорного сервера, логотип провайдера |
 
@@ -50,15 +51,22 @@ python tests/names_selftest.py
 python tests/test_s3_local.py
 python tests/fuzz_local.py
 python tests/test_tarpit_local.py
+python tests/test_sitestats_local.py
+python tests/test_agent_i18n.py
 sh tests/i18n/run.sh          # интерфейс на русском и английском (нужен Docker)
 ```
 
 Нужны Python 3.10+ и (для части тестов) `traceroute`; на Windows используется заглушка из `tests/`.
 Для проверки в реальных браузерах: `tests/browsers_docker.py` (Playwright в Docker).
 
+## Перевод сайта
+
+Все тексты интерфейса лежат в `siteparts/strings.py` (русский текст сверяется с эталоном `tests/i18n/golden_ru.json`).
+Чтобы добавить язык, добавьте туда его словари, страницу в `siteparts/pages.py` и маршруты `/<язык>/` в `Caddyfile.dagart`.
+
 ## Данные и лицензии
 
-- Геолокация IP: DB-IP.com (CC BY 4.0). Названия городов: GeoNames (CC BY 4.0).
+- Геолокация IP: DB-IP.com (CC BY 4.0). Названия городов: GeoNames (CC BY 4.0). Названия и типы сетей: RIPEstat и PeeringDB.
 - Логотипы провайдеров принадлежат их владельцам и показываются только как опознавательный знак сети.
 
 ## Связь
