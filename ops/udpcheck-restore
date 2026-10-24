@@ -1,0 +1,78 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+# Восстановление хаба из зашифрованной копии в S3 (её делает udpcheck-backup) на новом сервере.
+# Перед запуском: код и службы уже стоят (/opt/udpcheck, /usr/local/sbin/udpcheck-s3), а в /etc/udpcheck лежат backup.env (доступ к S3)
+# и backup.pass (пароль шифрования): их кладёт владелец, скрипт их не выводит и в копию не пишет.
+# Запуск от root:  udpcheck-restore            (последняя копия hub/hub-*.tar.gz.enc)
+#                  udpcheck-restore hub/ИМЯ    (конкретная копия; список: udpcheck-s3 list hub/)
+# Что делает: останавливает udpcheck, раскладывает базу, /etc/udpcheck (кроме backup.env/backup.pass), словари названий и справочник городов,
+# сайт, Caddyfile (в /etc/caddy/Caddyfile.restored: включать его стоит после переключения DNS), udpcheck.service с дополнениями; запускает udpcheck.
+# Прежние файлы на месте назначения сохраняются с суффиксом .pre-restore. Базы DB-IP в копии нет: после восстановления запустите udpcheck-geo-update.
+[ -r /etc/udpcheck/backup.env ] && { set -a; . /etc/udpcheck/backup.env; set +a; }
+set -eu
+PASS="${BACKUP_PASS_FILE:-/etc/udpcheck/backup.pass}"
+[ -n "${S3_BUCKET:-}" ] || { echo "в /etc/udpcheck/backup.env не задан S3_BUCKET" >&2; exit 1; }
+[ -s "$PASS" ] || { echo "нет файла с паролем шифрования ($PASS)" >&2; exit 1; }
+S3=/usr/local/sbin/udpcheck-s3
+NAME="${1:-$($S3 list hub/ | awk '{print $2}' | grep -E '^hub/hub-[0-9]{8}-[0-9]{4}\.tar\.gz\.enc$' | sort | tail -1)}"
+[ -n "$NAME" ] || { echo "в S3 нет копий hub/hub-*.tar.gz.enc" >&2; exit 1; }
+echo "копия: $NAME"
+W="$(mktemp -d)"
+trap 'rm -rf "$W"' EXIT
+$S3 get "$NAME" "$W/hub.enc"
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$PASS" -in "$W/hub.enc" -out "$W/hub.tgz" || { echo "не расшифровалось: неверный пароль или повреждённая копия" >&2; exit 1; }
+tar -C "$W" -xzf "$W/hub.tgz"
+[ -s "$W/hub.db" ] && [ -d "$W/files" ] || { echo "в архиве нет hub.db или files/" >&2; exit 1; }
+python3 - "$W/hub.db" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+print("база цела:", c.execute("PRAGMA integrity_check").fetchone()[0], "| проверок:", c.execute("SELECT COUNT(*) FROM webchecks").fetchone()[0])
+PY
+
+keep() {   # keep ПУТЬ: сохранить прежнюю версию рядом
+  [ -e "$1" ] && [ ! -e "$1.pre-restore" ] && cp -a "$1" "$1.pre-restore" || true
+}
+
+systemctl stop udpcheck 2>/dev/null || true
+# настройки и секреты опорных серверов: всё из копии, кроме доступа к копиям (его в копии и нет)
+install -d -m 755 /etc/udpcheck
+for f in "$W"/files/etc-udpcheck/*; do
+  b="$(basename "$f")"
+  case "$b" in backup.env|backup.pass) continue ;; esac
+  keep "/etc/udpcheck/$b"
+  cp -a "$f" "/etc/udpcheck/$b"
+done
+# словари названий и справочник городов
+install -d -m 755 /opt/udpcheck/geo
+for f in overrides names names_en brands provider_kinds; do
+  [ -f "$W/files/$f.json" ] && { keep "/opt/udpcheck/geo/$f.json"; cp -a "$W/files/$f.json" /opt/udpcheck/geo/; }
+done
+[ -f "$W/files/cities_ru.sqlite" ] && cp -a "$W/files/cities_ru.sqlite" /opt/udpcheck/geo/
+# сайт
+[ -d /var/www/udpcheck-site ] && [ ! -e /var/www/udpcheck-site.pre-restore ] && mv /var/www/udpcheck-site /var/www/udpcheck-site.pre-restore
+rm -rf /var/www/udpcheck-site
+install -d -m 755 /var/www
+cp -a "$W/files/site" /var/www/udpcheck-site
+# Caddyfile: рядом, не вместо текущего (до переключения DNS сертификаты не выпустятся)
+install -d -m 755 /etc/caddy
+cp -a "$W/files/Caddyfile" /etc/caddy/Caddyfile.restored
+# служба хаба с дополнениями (hub.conf, оповещения)
+[ -f "$W/files/udpcheck.service" ] && { keep /etc/systemd/system/udpcheck.service; cp -a "$W/files/udpcheck.service" /etc/systemd/system/; }
+[ -d "$W/files/udpcheck.service.d" ] && { install -d -m 755 /etc/systemd/system/udpcheck.service.d; cp -a "$W/files/udpcheck.service.d/." /etc/systemd/system/udpcheck.service.d/; }
+systemctl daemon-reload
+# база: каталог состояния создаёт systemd (DynamicUser), поэтому сначала короткий запуск, потом база и владелец
+systemctl start udpcheck
+sleep 3
+systemctl stop udpcheck
+D=/var/lib/private/udpcheck
+[ -d "$D" ] || { echo "systemd не создал $D: проверьте StateDirectory в udpcheck.service.d/hub.conf" >&2; exit 1; }
+keep "$D/hub.db"
+rm -f "$D/hub.db-wal" "$D/hub.db-shm"
+cp "$W/hub.db" "$D/hub.db"
+chown -R "$(stat -c %u:%g "$D")" "$D"
+chmod 640 "$D/hub.db"
+systemctl enable --now udpcheck
+sleep 3
+echo "udpcheck: $(systemctl is-active udpcheck)"
+echo "готово. Дальше: udpcheck-geo-update (базы DB-IP), после переключения DNS: Caddyfile.restored -> Caddyfile и systemctl reload caddy"

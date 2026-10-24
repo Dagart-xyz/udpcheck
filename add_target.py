@@ -25,6 +25,7 @@ TCP_PORT = 8443
 ap = argparse.ArgumentParser()
 ap.add_argument("--code", required=True)
 ap.add_argument("--name", required=True)
+ap.add_argument("--name-en", default="", help="название на английском для /en/ (без него будет транслитерация)")
 ap.add_argument("--country", required=True, help="код страны сервера (RU, FR, FI...): для посетителей и узлов этой страны он «своя страна»")
 ap.add_argument("--host", required=True, help="адрес для SSH (он же адрес цели)")
 ap.add_argument("--key", choices=list(KEYS), default="target", help="какой ключ использовать для нового сервера")
@@ -78,7 +79,10 @@ print(ssh(args.host, args.key, "set -e; test -s /root/.ssh/authorized_keys; mkdi
 print("5. регистрация цели на хабе")
 cur = json.loads(ssh(HUB_HOST, "hub", "cat /etc/udpcheck/targets.json"))
 cur = [t for t in cur if t["code"] != args.code]
-cur.append({"code": args.code, "name": args.name, "country": args.country.upper(), "ip": args.host, "ports": PORTS, "secret": secret, "tcp_port": TCP_PORT})
+entry = {"code": args.code, "name": args.name, "country": args.country.upper(), "ip": args.host, "ports": PORTS, "secret": secret, "tcp_port": TCP_PORT}
+if args.name_en:
+    entry["name_en"] = args.name_en
+cur.append(entry)
 ssh(HUB_HOST, "hub", "umask 077; cat > /etc/udpcheck/targets.json && chmod 600 /etc/udpcheck/targets.json && systemctl restart udpcheck && sleep 3 && systemctl is-active udpcheck",
     json.dumps(cur, ensure_ascii=False).encode("utf-8"))
 print("   цель %s добавлена, всего целей: %d, хаб перезапущен" % (args.code, len(cur)))
