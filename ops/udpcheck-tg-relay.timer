@@ -1,0 +1,10 @@
+[Unit]
+Description=udpcheck: пересылка ntfy -> Telegram раз в минуту
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

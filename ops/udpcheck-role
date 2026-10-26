@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+"""udpcheck-role: какой из нескольких серверов-кандидатов сейчас хаб. Запускается по таймеру раз в 30 с на каждом кандидате (от root).
+
+Кто хаб, решает файл в S3 control/active.json (его пишет только переключатель udpcheck-failover):
+  {"active": "DDD1-XD", "epoch": 7, "mode": "takeover" | "handover", "from": "BBB1-XB", "since": 1793000000}
+  takeover: прежний хаб недоступен, новый поднимается из последней копии сразу;
+  handover: плановая передача, прежний хаб сначала делает последнюю копию и пишет control/released-<epoch>.json, новый ждёт эту отметку
+            (не дольше HANDOVER_WAIT; прежний мог за это время умереть) и только потом восстанавливается.
+Что делает кандидат на каждом шаге:
+  - он активный, а роли хаба нет: восстанавливает последнюю копию (udpcheck-restore), включает Caddy в режиме хаба, пишет control/ready-<epoch>-<код>.json;
+  - он не активный, а роль хаба есть: при передаче от него сначала копия и отметка released, затем роль хаба выключается
+    (дополнение hub.conf убирается, udpcheck остаётся только опорным сервером, Caddy в режиме ожидания);
+  - S3 недоступен или файла нет: ничего не меняет (кто был хабом, тот и остаётся);
+  - резервный раз в сутки берёт из последней копии сертификаты Caddy (udpcheck-restore --certs-only).
+Настройки: /etc/udpcheck/role.env  ROLE_SELF=код опорного сервера этого сервера (как в targets.json).
+Доступ к S3 и пароль копий те же, что у udpcheck-backup (/etc/udpcheck/backup.env, backup.pass).
+Команды: tick (шаг по таймеру), status (что известно сейчас), is-active (код 0, если этот сервер сейчас хаб: по нему udpcheck-backup решает, делать ли копию).
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+ROLE_ENV = os.environ.get("ROLE_ENV", "/etc/udpcheck/role.env")
+STATE = os.environ.get("ROLE_STATE", "/var/lib/udpcheck-role/state.json")
+DROPIN_DIR = "/etc/systemd/system/udpcheck.service.d"
+HUB_DROPIN = os.path.join(DROPIN_DIR, "hub.conf")
+HUB_DROPIN_OFF = HUB_DROPIN + ".standby"
+S3 = "/usr/local/sbin/udpcheck-s3"
+HANDOVER_WAIT = int(os.environ.get("ROLE_HANDOVER_WAIT", "600"))
+CERTS_EVERY = int(os.environ.get("ROLE_CERTS_EVERY", "86400"))
+ACTIVE_KEY = "control/active.json"
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def read_env(path):
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+class System:
+    """Всё, что трогает S3, systemd и файлы. Тесты подменяют его целиком."""
+
+    def s3(self, *args, timeout=120):
+        # доступ к S3 из backup.env подставляет оболочка: в процессе и в журнале его нет
+        cmd = ["sh", "-c", 'set -a; . /etc/udpcheck/backup.env; set +a; exec "$0" "$@"', S3] + list(args)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            raise RuntimeError((r.stdout + r.stderr).strip()[-300:])
+        return r.stdout
+
+    def s3_keys(self, prefix):
+        return {line.split()[-1] for line in self.s3("list", prefix).splitlines() if line.strip()}
+
+    def s3_get_json(self, key):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json")
+            self.s3("get", key, p)
+            with open(p, encoding="utf-8") as fh:
+                return json.load(fh)
+
+    def s3_put_json(self, key, obj):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json")
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(obj, fh)
+            self.s3("put", p, key)
+
+    def run(self, cmd, timeout=900, env=None):
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=dict(os.environ, **(env or {})))
+        if r.returncode != 0:
+            raise RuntimeError("%s: %s" % (" ".join(cmd), (r.stdout + r.stderr).strip()[-400:]))
+        return r.stdout
+
+    def exists(self, path):
+        return os.path.exists(path)
+
+    def rename(self, a, b):
+        os.replace(a, b)
+
+    def now(self):
+        return time.time()
+
+
+def hub_on(sysx):
+    return sysx.exists(HUB_DROPIN)
+
+
+def caddy_mode(sysx, mode):
+    """Caddy в режиме хаба или ожидания: готовые конфигурации лежат рядом (/etc/caddy/Caddyfile.hub и .standby). Нет их: Caddy не трогаем."""
+    src = "/etc/caddy/Caddyfile." + mode
+    if not sysx.exists(src):
+        return
+    sysx.run(["cp", src, "/etc/caddy/Caddyfile"])
+    # полный перезапуск, а не перезагрузка: при смене режима (готовые файлы <-> автоматическое управление) перезагрузка не подхватывает
+    # сертификаты из хранилища, и Caddy отвечает на TLS «internal error» (так было при первом настоящем переезде)
+    sysx.run(["systemctl", "restart", "caddy"])
+
+
+def promote(sysx, self_code, ctl):
+    log("роль хаба: включаю (эпоха %s, %s)" % (ctl.get("epoch"), ctl.get("mode")))
+    sysx.run(["/usr/local/sbin/udpcheck-restore"], timeout=1200)       # последняя копия, hub.conf из неё, запуск udpcheck
+    if not hub_on(sysx):
+        raise RuntimeError("после восстановления нет %s" % HUB_DROPIN)
+    caddy_mode(sysx, "hub")
+    sysx.s3_put_json("control/ready-%s-%s.json" % (ctl.get("epoch"), self_code), {"code": self_code, "t": int(sysx.now())})
+    log("роль хаба включена")
+
+
+def demote(sysx, self_code, ctl):
+    keys = sysx.s3_keys("control/") if ctl.get("mode") == "handover" and ctl.get("from") == self_code else set()
+    # новый хаб уже поднялся (не дождался нас): поздняя копия отсюда стала бы «последней» и откатила бы его данные, поэтому без неё
+    if keys and "control/ready-%s-%s.json" % (ctl.get("epoch"), ctl.get("active")) not in keys:
+        log("передаю роль хаба %s: последняя копия" % ctl.get("active"))
+        sysx.run(["/usr/local/sbin/udpcheck-backup"], timeout=1200, env={"UDPCHECK_BACKUP_FORCE": "1"})
+        sysx.s3_put_json("control/released-%s.json" % ctl.get("epoch"), {"code": self_code, "t": int(sysx.now())})
+    log("роль хаба: выключаю, остаюсь опорным сервером")
+    sysx.rename(HUB_DROPIN, HUB_DROPIN_OFF)
+    sysx.run(["systemctl", "daemon-reload"])
+    sysx.run(["systemctl", "restart", "udpcheck"])
+    # бывший хаб мог ни разу не восстанавливаться, и готовых сертификатов для режима ожидания у него нет: раскладываем из своего хранилища
+    sysx.run(["/usr/local/sbin/udpcheck-restore", "--local-certs"], timeout=120)
+    caddy_mode(sysx, "standby")
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    try:
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        tmp = STATE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(st, fh)
+        os.replace(tmp, STATE)
+    except OSError:
+        pass
+
+
+def tick(sysx, self_code, st):
+    """Один шаг. Возвращает строку о том, что сделано (для журнала и тестов). st: состояние между запусками, меняется на месте."""
+    now = sysx.now()
+    try:
+        ctl = sysx.s3_get_json(ACTIVE_KEY)
+        if not isinstance(ctl, dict) or not ctl.get("active"):
+            raise ValueError("в %s нет поля active" % ACTIVE_KEY)
+    except Exception as e:
+        st["s3_error"] = str(e)[:200]
+        return "нет связи с S3 или файла: ничего не меняю"
+    st.pop("s3_error", None)
+    st.update(active=ctl["active"], epoch=ctl.get("epoch"), seen=int(now))
+    me = ctl["active"] == self_code
+    if me and not hub_on(sysx):
+        if ctl.get("mode") == "handover" and ctl.get("from") not in (None, self_code):
+            released = "control/released-%s.json" % ctl.get("epoch") in sysx.s3_keys("control/")
+            if not released and now - float(ctl.get("since") or 0) < HANDOVER_WAIT:
+                return "жду, пока %s отдаст роль хаба" % ctl.get("from")
+        promote(sysx, self_code, ctl)
+        st["ready_epoch"] = ctl.get("epoch")
+        return "включил роль хаба"
+    if me and st.get("ready_epoch") != ctl.get("epoch"):
+        # хаб уже здесь, но отметки готовности для этой эпохи нет (включение прервалось, например Caddy не перезагрузился): дописываем
+        key = "control/ready-%s-%s.json" % (ctl.get("epoch"), self_code)
+        if key not in sysx.s3_keys("control/"):
+            caddy_mode(sysx, "hub")
+            sysx.s3_put_json(key, {"code": self_code, "t": int(now)})
+            st["ready_epoch"] = ctl.get("epoch")
+            return "хаб: дописал готовность"
+        st["ready_epoch"] = ctl.get("epoch")
+    if not me and hub_on(sysx):
+        demote(sysx, self_code, ctl)
+        return "выключил роль хаба (хаб теперь %s)" % ctl["active"]
+    if not me and now - st.get("certs_t", 0) >= CERTS_EVERY:
+        try:
+            sysx.run(["/usr/local/sbin/udpcheck-restore", "--certs-only"], timeout=600)
+            st["certs_t"] = int(now)
+            return "резерв: обновил сертификаты"
+        except Exception as e:
+            st["certs_t"] = int(now) - CERTS_EVERY + 3600        # не вышло: повтор через час
+            return "резерв: сертификаты не обновились: %s" % str(e)[:200]
+    return "хаб" if me else "резерв (хаб %s)" % ctl["active"]
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "tick"
+    self_code = read_env(ROLE_ENV).get("ROLE_SELF", "")
+    sysx = System()
+    st = load_state()
+    if cmd == "is-active":
+        # хаб = роль включена на этом сервере и последний прочитанный файл называет его (если файла ещё не видели: по роли)
+        ok = hub_on(sysx) and st.get("active", self_code) == self_code
+        return 0 if ok else 1
+    if cmd == "status":
+        print(json.dumps(dict(st, self=self_code, hub_on=hub_on(sysx)), ensure_ascii=False))
+        return 0
+    if cmd != "tick" or not self_code:
+        print(__doc__ if self_code else "в %s не задан ROLE_SELF" % ROLE_ENV)
+        return 2
+    try:
+        log(tick(sysx, self_code, st))
+        rc = 0
+    except Exception as e:
+        log("ошибка: %s" % str(e)[:400])
+        rc = 1
+    save_state(st)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

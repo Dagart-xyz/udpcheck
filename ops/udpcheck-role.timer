@@ -1,0 +1,10 @@
+[Unit]
+Description=udpcheck: проверка роли хаба раз в 30 секунд
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

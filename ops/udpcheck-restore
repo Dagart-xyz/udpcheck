@@ -6,15 +6,44 @@
 # и backup.pass (пароль шифрования): их кладёт владелец, скрипт их не выводит и в копию не пишет.
 # Запуск от root:  udpcheck-restore            (последняя копия hub/hub-*.tar.gz.enc)
 #                  udpcheck-restore hub/ИМЯ    (конкретная копия; список: udpcheck-s3 list hub/)
-# Что делает: останавливает udpcheck, раскладывает базу, /etc/udpcheck (кроме backup.env/backup.pass), словари названий и справочник городов,
-# сайт, Caddyfile (в /etc/caddy/Caddyfile.restored: включать его стоит после переключения DNS), udpcheck.service с дополнениями; запускает udpcheck.
+#                  udpcheck-restore --certs-only   (только сертификаты Caddy из последней копии: так резервный сервер держит их свежими)
+#                  udpcheck-restore --local-certs  (без S3: разложить для режима ожидания сертификаты из собственного хранилища Caddy;
+#                                                   так бывший хаб, который сам никогда не восстанавливался, может перейти в режим ожидания)
+# Что делает: останавливает udpcheck, раскладывает базу, /etc/udpcheck (кроме backup.env/backup.pass; target.env и role.env, если на сервере уже
+# есть свои, остаются свои), словари названий и справочник городов, сайт, сертификаты Caddy, Caddyfile (в /etc/caddy/Caddyfile.restored:
+# включать его стоит после переключения DNS), udpcheck.service с дополнениями; запускает udpcheck.
 # Прежние файлы на месте назначения сохраняются с суффиксом .pre-restore. Базы DB-IP в копии нет: после восстановления запустите udpcheck-geo-update.
 [ -r /etc/udpcheck/backup.env ] && { set -a; . /etc/udpcheck/backup.env; set +a; }
 set -eu
 PASS="${BACKUP_PASS_FILE:-/etc/udpcheck/backup.pass}"
-[ -n "${S3_BUCKET:-}" ] || { echo "в /etc/udpcheck/backup.env не задан S3_BUCKET" >&2; exit 1; }
-[ -s "$PASS" ] || { echo "нет файла с паролем шифрования ($PASS)" >&2; exit 1; }
+if [ "${1:-}" = "--local-certs" ]; then
+  LOCAL_CERTS=1
+else
+  LOCAL_CERTS=0
+  [ -n "${S3_BUCKET:-}" ] || { echo "в /etc/udpcheck/backup.env не задан S3_BUCKET" >&2; exit 1; }
+  [ -s "$PASS" ] || { echo "нет файла с паролем шифрования ($PASS)" >&2; exit 1; }
+fi
 S3=/usr/local/sbin/udpcheck-s3
+CERTS_ONLY=0
+standby_certs() {   # сертификаты из хранилища Caddy рядом в простом виде: режим ожидания берёт их как готовые файлы и сам ничего не выпускает
+  src=/var/lib/caddy/.local/share/caddy/certificates
+  [ -d "$src" ] || return 0
+  install -d -m 750 -o root -g caddy /etc/caddy/standby-certs
+  for crt in $(ls -1tr "$src"/*/*/*.crt 2>/dev/null); do      # от старых к новым: при двух выпускающих остаётся самый свежий
+    key="${crt%.crt}.key"
+    [ -f "$key" ] || continue
+    name="$(basename "$crt" .crt)"
+    install -m 640 -o root -g caddy "$crt" "/etc/caddy/standby-certs/$name.crt"
+    install -m 640 -o root -g caddy "$key" "/etc/caddy/standby-certs/$name.key"
+  done
+}
+if [ "$LOCAL_CERTS" = 1 ]; then
+  id caddy >/dev/null 2>&1 || { echo "Caddy не установлен"; exit 0; }
+  standby_certs
+  echo "сертификаты для режима ожидания разложены из хранилища Caddy: $(ls /etc/caddy/standby-certs 2>/dev/null | tr '\n' ' ')"
+  exit 0
+fi
+[ "${1:-}" = "--certs-only" ] && { CERTS_ONLY=1; shift; }
 NAME="${1:-$($S3 list hub/ | awk '{print $2}' | grep -E '^hub/hub-[0-9]{8}-[0-9]{4}\.tar\.gz\.enc$' | sort | tail -1)}"
 [ -n "$NAME" ] || { echo "в S3 нет копий hub/hub-*.tar.gz.enc" >&2; exit 1; }
 echo "копия: $NAME"
@@ -24,6 +53,19 @@ $S3 get "$NAME" "$W/hub.enc"
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$PASS" -in "$W/hub.enc" -out "$W/hub.tgz" || { echo "не расшифровалось: неверный пароль или повреждённая копия" >&2; exit 1; }
 tar -C "$W" -xzf "$W/hub.tgz"
 [ -s "$W/hub.db" ] && [ -d "$W/files" ] || { echo "в архиве нет hub.db или files/" >&2; exit 1; }
+if [ "$CERTS_ONLY" = 1 ]; then
+  [ -d "$W/files/caddy-data" ] && id caddy >/dev/null 2>&1 || { echo "в копии нет сертификатов Caddy или Caddy не установлен"; exit 0; }
+  install -d -m 700 -o caddy -g caddy /var/lib/caddy/.local/share
+  rm -rf /var/lib/caddy/.local/share/caddy.new
+  cp -a "$W/files/caddy-data" /var/lib/caddy/.local/share/caddy.new
+  chown -R caddy:caddy /var/lib/caddy/.local/share/caddy.new
+  rm -rf /var/lib/caddy/.local/share/caddy
+  mv /var/lib/caddy/.local/share/caddy.new /var/lib/caddy/.local/share/caddy
+  standby_certs
+  systemctl reload caddy 2>/dev/null || true
+  echo "сертификаты Caddy обновлены из $NAME"
+  exit 0
+fi
 python3 - "$W/hub.db" <<'PY'
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
@@ -40,6 +82,8 @@ install -d -m 755 /etc/udpcheck
 for f in "$W"/files/etc-udpcheck/*; do
   b="$(basename "$f")"
   case "$b" in backup.env|backup.pass) continue ;; esac
+  # собственная роль кандидата остаётся своей; на чистом сервере (восстановление после аварии) их нет, и они берутся из копии
+  case "$b" in target.env|role.env) [ -e "/etc/udpcheck/$b" ] && continue ;; esac
   keep "/etc/udpcheck/$b"
   cp -a "$f" "/etc/udpcheck/$b"
 done
@@ -54,6 +98,15 @@ done
 rm -rf /var/www/udpcheck-site
 install -d -m 755 /var/www
 cp -a "$W/files/site" /var/www/udpcheck-site
+# сертификаты Caddy из копии: выданы на домен, поэтому годятся на любом сервере, который им отвечает
+if [ -d "$W/files/caddy-data" ] && id caddy >/dev/null 2>&1; then
+  install -d -m 700 -o caddy -g caddy /var/lib/caddy/.local/share
+  keep /var/lib/caddy/.local/share/caddy
+  rm -rf /var/lib/caddy/.local/share/caddy
+  cp -a "$W/files/caddy-data" /var/lib/caddy/.local/share/caddy
+  chown -R caddy:caddy /var/lib/caddy/.local/share/caddy
+  standby_certs
+fi
 # Caddyfile: рядом, не вместо текущего (до переключения DNS сертификаты не выпустятся)
 install -d -m 755 /etc/caddy
 cp -a "$W/files/Caddyfile" /etc/caddy/Caddyfile.restored

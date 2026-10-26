@@ -1,0 +1,34 @@
+[Unit]
+Description=udpcheck: переключатель хаба между кандидатами (раз в минуту)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/udpcheck-failover/failover.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/udpcheck-failover run
+# настройки и ключи читает systemd от root и отдаёт процессу только на время запуска
+LoadCredential=failover.env:/etc/udpcheck-failover/failover.env
+LoadCredential=porkbun.env:/etc/udpcheck-failover/porkbun.env
+LoadCredential=backup.env:/etc/udpcheck-failover/backup.env
+StateDirectory=udpcheck-failover
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+# жёсткие потолки и низкий приоритет, чтобы не мешать другим службам
+MemoryMax=64M
+CPUQuota=20%
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=5min

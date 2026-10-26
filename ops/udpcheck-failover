@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+"""udpcheck-failover: переключатель хаба между кандидатами. Работает на отдельном сервере, раз в минуту по таймеру.
+
+Кандидаты перечислены по приоритету: CANDIDATES="AAA1-XX=192.0.2.10,BBB1-YY=198.51.100.20,CCC1-ZZ=203.0.113.30".
+Кто сейчас хаб, записано в S3 в control/active.json; этот файл пишет только переключатель, кандидаты читают его сами (ops/udpcheck-role).
+Каждую минуту:
+  1. Проверяет активный хаб: HTTPS на его адрес с именем домена, /api/v2/health должен ответить ok и db_ok.
+  2. Вниз: активный не отвечает DOWN_AFTER секунд подряд, а сам переключатель при этом видит другие серверы (значит, дело не в нём) ->
+     назначает следующего живого по приоритету (mode=takeover). Живой кандидат: отвечает по HTTPS с действующим сертификатом.
+  3. Наверх: кандидат выше активного отвечает UP_AFTER секунд подряд, и с последнего переключения прошло не меньше UP_AFTER ->
+     плановая передача (mode=handover): прежний хаб делает последнюю копию и отдаёт роль, новый поднимается из неё.
+  4. Новый хаб отметился готовым (control/ready-<эпоха>-<код>.json) и отвечает -> A-записи домена и www переводятся на его адрес
+     через API Porkbun. Не поднялся за READY_WAIT -> назначается следующий.
+  5. Раз в DNS_EVERY сверяет A-записи с активным хабом и чинит расхождение.
+Обо всём сообщает в ntfy (NTFY_TOPIC); в Telegram сообщения пересылает отдельная служба (ops/udpcheck-tg-relay).
+Настройки (файлы KEY=VALUE, через LoadCredential или напрямую): failover.env (CANDIDATES, DOMAIN, NTFY_TOPIC, сроки),
+porkbun.env (PORKBUN_API_KEY, PORKBUN_SECRET_KEY), backup.env (доступ к S3, как у копий). Ключи в журнал не попадают.
+Команды: run (шаг по таймеру), status, init КОД (первый файл active.json: кто хаб сейчас; DNS не трогает).
+"""
+import http.client
+import importlib.machinery
+import importlib.util
+import json
+import os
+import socket
+import ssl
+import sys
+import tempfile
+import time
+import urllib.request
+
+CONF_FILES = ("failover.env", "porkbun.env", "backup.env")
+CONF_DIRS = (os.environ.get("CREDENTIALS_DIRECTORY", ""), "/etc/udpcheck-failover", "/etc/udpcheck")
+STATE = os.environ.get("FAILOVER_STATE", os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/udpcheck-failover"), "state.json"))
+S3_SCRIPT = os.environ.get("UDPCHECK_S3", "/usr/local/sbin/udpcheck-s3")
+PORKBUN = "https://api.porkbun.com/api/json/v3"
+ACTIVE_KEY = "control/active.json"
+ERRORS_ALERT = 15
+
+
+def read_env(path):
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+def load_conf():
+    conf = {}
+    for name in CONF_FILES:
+        for d in CONF_DIRS:
+            if d and os.path.exists(os.path.join(d, name)):
+                conf.update(read_env(os.path.join(d, name)))
+                break
+    return conf
+
+
+def candidates(conf):
+    """[(код, адрес)] по приоритету."""
+    out = []
+    for part in conf.get("CANDIDATES", "").split(","):
+        if "=" in part:
+            code, ip = part.split("=", 1)
+            out.append((code.strip(), ip.strip()))
+    return out
+
+
+class _Conn(http.client.HTTPSConnection):
+    """HTTPS на конкретный адрес, но с именем домена в SNI и в проверке сертификата."""
+    def __init__(self, ip, domain, timeout):
+        super().__init__(ip, 443, timeout=timeout, context=ssl.create_default_context())
+        self._domain = domain
+
+    def connect(self):
+        sock = socket.create_connection((self.host, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self._domain)
+
+
+class Net:
+    """Сеть, S3, DNS и оповещения. Тесты подменяют его целиком."""
+    def __init__(self, conf):
+        self.conf = conf
+        self.domain = conf.get("DOMAIN", "dagart.xyz")
+        self.timeout = float(conf.get("CHECK_TIMEOUT", "10"))
+        self._s3 = None
+
+    def get(self, ip, path):
+        """(код ответа, тело) запроса к серверу ip под именем домена; исключение, если нет соединения или сертификат не тот."""
+        c = _Conn(ip, self.domain, self.timeout)
+        try:
+            c.request("GET", path, headers={"Host": self.domain, "User-Agent": "udpcheck-failover"})
+            r = c.getresponse()
+            return r.status, r.read(65536)
+        finally:
+            c.close()
+
+    def reach(self, url):
+        try:
+            urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "udpcheck-failover"}), timeout=self.timeout).read(1024)
+            return True
+        except urllib.error.HTTPError:
+            return True                 # ответ есть, значит связь есть
+        except Exception:
+            return False
+
+    def _s3call(self, fn, *args):
+        """Клиент S3 сообщает об ошибках через sys.exit: здесь это обычная ошибка, чтобы шаг учёл «S3 недоступен», а не упал."""
+        try:
+            return fn(*args)
+        except SystemExit as e:
+            raise RuntimeError("S3: %s" % e)
+
+    def s3(self):
+        if self._s3 is None:
+            for k in ("S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_SCHEME", "S3_PATHSTYLE"):
+                if k in self.conf:
+                    os.environ[k] = self.conf[k]
+            loader = importlib.machinery.SourceFileLoader("udpcheck_s3", S3_SCRIPT)
+            spec = importlib.util.spec_from_loader("udpcheck_s3", loader)
+            m = importlib.util.module_from_spec(spec)
+            loader.exec_module(m)
+            self._s3 = self._s3call(m.S3)
+        return self._s3
+
+    def s3_keys(self, prefix):
+        return {k for k, _n in self._s3call(self.s3().list, prefix)}
+
+    def s3_get_json(self, key):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json")
+            self._s3call(self.s3().get, key, p)
+            with open(p, encoding="utf-8") as fh:
+                return json.load(fh)
+
+    def s3_put_json(self, key, obj):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json")
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(obj, fh)
+            self._s3call(self.s3().put, p, key)
+
+    def _porkbun(self, path, extra=None):
+        body = dict(apikey=self.conf.get("PORKBUN_API_KEY", ""), secretapikey=self.conf.get("PORKBUN_SECRET_KEY", ""), **(extra or {}))
+        req = urllib.request.Request(PORKBUN + path, data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", "User-Agent": "udpcheck-failover"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            out = json.loads(r.read(65536) or b"{}")
+        if out.get("status") != "SUCCESS":
+            raise RuntimeError("Porkbun: %s" % str(out.get("message") or out)[:200])
+        return out
+
+    def dns_get(self, sub):
+        """Адреса A-записи (sub="" это сам домен, "www" это www)."""
+        out = self._porkbun("/dns/retrieveByNameType/%s/A%s" % (self.domain, "/" + sub if sub else ""))
+        return sorted(r.get("content") for r in out.get("records", []))
+
+    def dns_set(self, sub, ip):
+        self._porkbun("/dns/editByNameType/%s/A%s" % (self.domain, "/" + sub if sub else ""), {"content": ip, "ttl": self.conf.get("DNS_TTL", "600")})
+
+    def notify(self, text):
+        topic = self.conf.get("NTFY_TOPIC", "")
+        if not topic:
+            print("ОПОВЕЩЕНИЕ:", text, flush=True)
+            return True
+        try:
+            req = urllib.request.Request("https://ntfy.sh/" + topic, data=text.encode("utf-8"), method="POST",
+                                         headers={"Title": "udpcheck", "User-Agent": "udpcheck-failover"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def now(self):
+        return time.time()
+
+
+def hub_ok(net, ip):
+    try:
+        st, body = net.get(ip, "/api/v2/health")
+        d = json.loads(body or b"{}")
+        return st == 200 and d.get("ok") is True and d.get("db_ok") is not False
+    except Exception:
+        return False
+
+
+def alive(net, ip):
+    """Сервер отвечает по HTTPS с действующим сертификатом домена (любым кодом): Caddy жив, сеть есть."""
+    try:
+        net.get(ip, "/robots.txt")
+        return True
+    except Exception:
+        return False
+
+
+def self_ok(net, cands, active):
+    """Сам переключатель на связи: видит хотя бы двух из остальных кандидатов и внешних точек. Иначе молчание хаба могло быть нашей бедой."""
+    seen = sum(1 for code, ip in cands if code != active and alive(net, ip))
+    seen += sum(1 for u in ("https://api.porkbun.com/", "https://github.com/") if net.reach(u))
+    return seen >= 2
+
+
+def assign(net, st, code, mode, frm, now, why):
+    ctl = {"active": code, "epoch": int(st.get("epoch", 0)) + 1, "mode": mode, "from": frm, "since": int(now)}
+    net.s3_put_json(ACTIVE_KEY, ctl)
+    st.update(epoch=ctl["epoch"], active=code, pending=code, pending_since=int(now), switched=int(now))
+    net.notify("Хаб: назначаю %s вместо %s (%s). Жду, пока он поднимется из копии, затем переключу DNS." % (code, frm, why))
+    return "назначил %s (%s)" % (code, why)
+
+
+def step(net, conf, st):
+    """Один шаг переключателя. Возвращает строку о сделанном. st: состояние между запусками (меняется на месте)."""
+    now = net.now()
+    cands = candidates(conf)
+    ips = dict(cands)
+    order = [c for c, _ip in cands]
+    down_after = float(conf.get("DOWN_AFTER", "300"))
+    up_after = float(conf.get("UP_AFTER", "1800"))
+    ready_wait = float(conf.get("READY_WAIT", "900"))
+    try:
+        ctl = net.s3_get_json(ACTIVE_KEY)
+    except Exception as e:
+        st["s3_fail"] = st.get("s3_fail") or int(now)
+        if now - st["s3_fail"] >= 900 and not st.get("s3_alerted"):
+            st["s3_alerted"] = net.notify("Переключатель хаба не может прочитать %s в S3 уже 15 минут: переключение не работает." % ACTIVE_KEY)
+        return "нет связи с S3: %s" % str(e)[:150]
+    if st.pop("s3_alerted", None):
+        net.notify("Переключатель хаба снова видит S3.")
+    st.pop("s3_fail", None)
+    active = ctl.get("active")
+    if active not in ips:
+        return "активный %s не в списке кандидатов: ничего не делаю" % active
+    st["epoch"] = max(int(st.get("epoch", 0)), int(ctl.get("epoch") or 0))
+    st["active"] = active
+
+    # живость кандидатов: с какого момента подряд отвечают
+    up = st.setdefault("up_since", {})
+    up.pop(active, None)                 # у активного отсчёта нет: перестанет быть активным, отсчёт начнётся заново
+    for code, ip in cands:
+        if code == active:
+            continue
+        if alive(net, ip):
+            up.setdefault(code, int(now))
+        else:
+            up.pop(code, None)
+
+    # ждём, пока назначенный поднимется, затем DNS
+    if st.get("pending") == active:
+        if "control/ready-%s-%s.json" % (ctl.get("epoch"), active) in net.s3_keys("control/") and hub_ok(net, ips[active]):
+            try:
+                for sub in ("", "www"):
+                    net.dns_set(sub, ips[active])
+            except Exception as e:
+                if not st.get("dns_alerted"):
+                    st["dns_alerted"] = net.notify("Хаб %s поднялся, но DNS переключить не удалось: %s. Пробую каждую минуту." % (active, str(e)[:150]))
+                return "DNS не переключён: %s" % str(e)[:150]
+            st.pop("dns_alerted", None)
+            st.pop("pending", None)
+            st["dns_t"] = int(now)
+            net.notify("Хаб переключён на %s (%s): DNS указывает на него." % (active, ips[active]))
+            return "DNS переведён на %s" % active
+        if now - st.get("pending_since", now) < ready_wait:
+            return "жду, пока %s поднимется" % active
+        nxt = [c for c in order if c != active and c in up]
+        if not nxt:
+            return "%s не поднялся, другого живого кандидата нет" % active
+        return assign(net, st, nxt[0], "takeover", active, now, "%s не поднялся за %d мин" % (active, ready_wait // 60))
+
+    # активный хаб
+    if hub_ok(net, ips[active]):
+        st.pop("down_since", None)
+        if st.pop("down_alerted", None):
+            net.notify("Хаб %s снова отвечает." % active)
+    else:
+        st.setdefault("down_since", int(now))
+        if now - st["down_since"] >= down_after:
+            if not self_ok(net, cands, active):
+                return "хаб %s не отвечает, но и переключатель почти никого не видит: не переключаю" % active
+            nxt = [c for c in order if c != active and c in up]
+            if not nxt:
+                if not st.get("down_alerted"):
+                    st["down_alerted"] = net.notify("Хаб %s не отвечает %d мин, а переключиться не на кого: все кандидаты молчат." % (active, down_after // 60))
+                return "хаб %s молчит, кандидатов нет" % active
+            st.pop("down_since", None)
+            return assign(net, st, nxt[0], "takeover", active, now, "%s не отвечает %d мин" % (active, down_after // 60))
+        return "хаб %s молчит %d с" % (active, now - st["down_since"])
+
+    # наверх: кандидат выше активного стабильно жив, и переключений давно не было
+    higher = order[:order.index(active)]
+    for code in higher:
+        if code in up and now - up[code] >= up_after and now - st.get("switched", 0) >= up_after:
+            return assign(net, st, code, "handover", active, now, "%s снова жив %d мин" % (code, up_after // 60))
+
+    # сверка DNS
+    if now - st.get("dns_t", 0) >= float(conf.get("DNS_EVERY", "600")):
+        st["dns_t"] = int(now)
+        fixed = []
+        for sub in ("", "www"):
+            if net.dns_get(sub) != [ips[active]]:
+                net.dns_set(sub, ips[active])
+                fixed.append(sub or "@")
+        if fixed:
+            net.notify("DNS расходился с активным хабом %s: поправил записи %s." % (active, ", ".join(fixed)))
+            return "DNS поправлен: %s" % ", ".join(fixed)
+    return "хаб %s в порядке" % active
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    try:
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        tmp = STATE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(st, fh)
+        os.replace(tmp, STATE)
+    except OSError:
+        pass
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "run"
+    conf = load_conf()
+    if not candidates(conf):
+        print("не заданы CANDIDATES (failover.env)")
+        return 2
+    net = Net(conf)
+    st = load_state()
+    if cmd == "status":
+        print(json.dumps(st, ensure_ascii=False))
+        return 0
+    if cmd == "init" and len(argv) == 3:
+        if argv[2] not in dict(candidates(conf)):
+            print("%s нет среди кандидатов" % argv[2])
+            return 2
+        net.s3_put_json(ACTIVE_KEY, {"active": argv[2], "epoch": int(st.get("epoch", 0)) + 1, "mode": "takeover", "from": None, "since": int(time.time())})
+        st.update(epoch=int(st.get("epoch", 0)) + 1, active=argv[2], switched=int(time.time()))
+        st.pop("pending", None)
+        save_state(st)
+        print("записан %s: активный %s" % (ACTIVE_KEY, argv[2]))
+        return 0
+    if cmd != "run":
+        print(__doc__)
+        return 2
+    try:
+        print(step(net, conf, st), flush=True)
+        rc = 0
+        if st.pop("errors", 0) >= ERRORS_ALERT:
+            net.notify("Переключатель хаба снова работает без ошибок.")
+    except Exception as e:
+        print("ошибка: %s" % str(e)[:300], flush=True)
+        rc = 1
+        st["errors"] = int(st.get("errors", 0)) + 1
+        if st["errors"] == ERRORS_ALERT:          # одна тревога, а не каждую минуту
+            net.notify("Переключатель хаба %d раз подряд завершается с ошибкой: %s. Переключение при аварии сейчас не сработает." % (ERRORS_ALERT, str(e)[:200]))
+    save_state(st)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

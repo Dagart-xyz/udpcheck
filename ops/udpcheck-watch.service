@@ -15,3 +15,6 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 MemoryMax=64M
+# потолок процессора и низкий приоритет, чтобы не мешать другим службам
+CPUQuota=20%
+Nice=10

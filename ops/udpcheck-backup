@@ -1,15 +1,21 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 UDPcheck authors
-# Ежедневная копия хаба: база (через снимок SQLite), списки опорных серверов с секретами, настройки, сайт.
+# Копия хаба раз в час: база (через снимок SQLite), списки опорных серверов с секретами, настройки, сайт, сертификаты Caddy.
+# Если на сервере есть /etc/udpcheck/role.env (несколько кандидатов в хабы, см. udpcheck-role), копию делает только тот, кто сейчас хаб;
+# UDPCHECK_BACKUP_FORCE=1 делает копию без этой проверки (так udpcheck-role снимает последнюю копию при передаче роли).
 # Куда класть копии задаёт /etc/udpcheck/backup.env (можно оба назначения сразу):
 #   по SSH на свой сервер:  BACKUP_DEST=пользователь@сервер  BACKUP_KEY=файл ключа (по умолчанию /root/.ssh/backup_ed25519)
 #   в S3-хранилище:         S3_ENDPOINT=s3.ru-3.storage.selcloud.ru  S3_REGION=ru-3  S3_BUCKET=имя  S3_ACCESS_KEY=...  S3_SECRET_KEY=...
-#                           S3_KEEP=14 (сколько копий хранить)  BACKUP_PASS_FILE=/etc/udpcheck/backup.pass (пароль шифрования, по умолчанию он)
+#                           S3_KEEP_HOURS=48 S3_KEEP_DAYS=14 (последние 48 копий все, из более старых по одной на сутки за 14 суток)
+#                           BACKUP_PASS_FILE=/etc/udpcheck/backup.pass (пароль шифрования, по умолчанию он)
 # В S3 копия уходит ЗАШИФРОВАННОЙ (AES-256, openssl); пароль нужен для восстановления: храните его и вне сервера.
 # Расшифровать:  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass file:backup.pass -in копия.tar.gz.enc -out копия.tar.gz
 [ -r /etc/udpcheck/backup.env ] && { set -a; . /etc/udpcheck/backup.env; set +a; }
 set -eu
+if [ -r /etc/udpcheck/role.env ] && [ "${UDPCHECK_BACKUP_FORCE:-0}" != 1 ]; then
+  /usr/local/sbin/udpcheck-role is-active || { echo "этот сервер сейчас не хаб: копию не делаю"; exit 0; }
+fi
 BACKUP_DEST="${BACKUP_DEST:-}"
 BACKUP_KEY="${BACKUP_KEY:-/root/.ssh/backup_ed25519}"
 S3_BUCKET="${S3_BUCKET:-}"
@@ -30,6 +36,8 @@ for f in overrides names names_en brands provider_kinds; do cp -a "/opt/udpcheck
 cp -a /opt/udpcheck/geo/cities_ru.sqlite "$W/files/" 2>/dev/null || true      # русские названия городов: хаб открывает только на чтение, собирать заново долго
 cp -a /var/www/udpcheck-site "$W/files/site"
 cp -a /etc/caddy/Caddyfile "$W/files/"
+# сертификаты и учётная запись ACME: сертификат выдан на домен, резервный сервер берёт его отсюда и после переключения не ждёт выпуска нового
+[ -d /var/lib/caddy/.local/share/caddy ] && cp -a /var/lib/caddy/.local/share/caddy "$W/files/caddy-data"
 cp -a /etc/systemd/system/udpcheck.service /etc/systemd/system/udpcheck.service.d "$W/files/" 2>/dev/null || true
 tar -C "$W" -czf "$W/hub.tgz" hub.db files
 OK=1
@@ -40,7 +48,7 @@ if [ -n "$S3_BUCKET" ]; then
   NAME="hub-$(date -u +%Y%m%d-%H%M).tar.gz.enc"
   if openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:${BACKUP_PASS_FILE:-/etc/udpcheck/backup.pass}" -in "$W/hub.tgz" -out "$W/hub.enc" \
      && /usr/local/sbin/udpcheck-s3 put "$W/hub.enc" "hub/$NAME"; then
-    /usr/local/sbin/udpcheck-s3 prune hub/ "${S3_KEEP:-14}" || echo "старые копии в S3 удалить не удалось" >&2
+    /usr/local/sbin/udpcheck-s3 prune-tiered hub/ "${S3_KEEP_HOURS:-48}" "${S3_KEEP_DAYS:-14}" || echo "старые копии в S3 удалить не удалось" >&2
   else
     echo "копия в S3 не ушла" >&2
     OK=0

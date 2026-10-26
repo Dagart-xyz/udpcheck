@@ -1,0 +1,22 @@
+[Unit]
+Description=udpcheck: пересылка оповещений из ntfy в Telegram
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/udpcheck-watch.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/udpcheck-tg-relay run
+LoadCredential=relay.env:/etc/udpcheck-watch.env
+StateDirectory=udpcheck-tg-relay
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=48M
+CPUQuota=20%
+TimeoutStartSec=2min

@@ -1,0 +1,13 @@
+[Unit]
+Description=udpcheck: какой сервер сейчас хаб (по файлу control/active.json в S3)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/udpcheck/role.env
+
+[Service]
+Type=oneshot
+# от root: включение и выключение роли хаба меняет дополнения systemd, Caddy и раскладывает копию
+ExecStart=/usr/local/sbin/udpcheck-role tick
+StateDirectory=udpcheck-role
+TimeoutStartSec=25min
+Nice=5

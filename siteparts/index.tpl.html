@@ -99,8 +99,6 @@ pre.txt{margin:0;background:var(--surface2);border:1px solid var(--line);border-
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600;font-size:13px}
-.bar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--surface2);min-width:90px;margin-top:6px}
-.bar i{display:block;height:100%}
 .tblwrap{overflow-x:auto}
 pre.cmd{margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;font:13px/1.5 var(--mono);white-space:pre}
 .cmdrow{margin:10px 0}
@@ -173,8 +171,6 @@ svg.spark{display:block;width:100%;height:38px;color:var(--muted)}
 .seg button.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 svg.tl{display:block;width:100%;height:64px;border-radius:8px;background:var(--surface2)}
 .tl-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px}
-.trow{margin:12px 0}
-.trow .nm{font-size:14px;font-weight:600}
 #provider{display:none}
 body.detail #provider{display:block}
 body.detail .hero,body.detail section:not(#provider){display:none}
@@ -240,6 +236,7 @@ button.btn.ghost{border:1px solid var(--line)}
     <h2>@{h2_journal}</h2>
     <p class="muted small" style="margin:-6px 0 12px">@{journal_help}</p>
     <div class="card"><div id="jlist" class="small muted">@{loading}</div></div>
+    <div class="pmore" id="jmore" hidden></div>
   </section>
 
   <section id="provider"></section>
@@ -372,7 +369,8 @@ var VERD = {
   CONTROL_DOWN:   {cls: "v-idle", big: tt("verd_unreliable"), line: tt("verd_ctrl_down_line"), what: ""},
   UNSTABLE_PATH:  {cls: "v-idle", big: tt("verd_unreliable"), line: tt("verd_unstable_line"), what: tt("verd_unstable_what")},
   NO_ANCHOR:      {cls: "v-idle", big: tt("verd_noanchor"), line: tt("verd_noanchor_line"), what: tt("verd_noanchor_what")},
-  NO_FOREIGN:     {cls: "v-idle", big: tt("verd_unreliable"), line: tt("verd_noforeign_line"), what: ""}
+  NO_FOREIGN:     {cls: "v-idle", big: tt("verd_unreliable"), line: tt("verd_noforeign_line"), what: ""},
+  IP_BLOCKED:     {cls: "v-warn", big: tt("verd_ipblock"), line: tt("verd_ipblock_line"), what: tt("verd_ipblock_what")}
 };
 var me = null, browserRes = null, traceData = null;
 function isHome(k){ return k !== "foreign"; }
@@ -403,10 +401,13 @@ function browserVerdict(results){
   // Серверы проекта решают, режется ли. Серверы добровольцев это независимые свидетели: если до них UDP идёт, а до серверов проекта нет,
   // вывод смягчается («выборочно»); если до них не идёт, а до серверов проекта идёт, это не блокировка. Обвинить провайдера они сами не могут.
   var ru = results.filter(function(r){ return isHome(r.kind) && (!r.community || r.control); });
-  var fr = results.filter(function(r){ return !isHome(r.kind) && !r.community; });
+  // сервер, который узлы этой сети видят недоступным целиком (ipblock), и он молчит: это не про UDP, в вывод не берём
+  var ipb = function(r){ return r.ipblock && r.ok === 0; };
+  var fr = results.filter(function(r){ return !isHome(r.kind) && !r.community && !ipb(r); });
   var vf = results.filter(function(r){ return !isHome(r.kind) && r.community; });
   if (!ru.length) return "NO_ANCHOR";
-  if (!ru.some(function(r){ return st(r) === "ok"; }) || !fr.length) return "CONTROL_BAD";
+  if (!ru.some(function(r){ return st(r) === "ok"; })) return "CONTROL_BAD";
+  if (!fr.length) return results.some(function(r){ return !isHome(r.kind) && !r.community && ipb(r); }) ? "IP_BLOCKED" : "CONTROL_BAD";
   var s = fr.map(st);
   if (s.every(function(x){ return x === "ok"; })) return "NO_BLOCK";
   if (s.every(function(x){ return x === "dead"; })) {
@@ -457,7 +458,7 @@ function runBrowserUdp(onTick){
     var results = [], tasks = [];
     r.body.targets.forEach(function(t){
       var res = {code: t.code, kind: t.kind, name: t.community ? tt("comm_name", {country: cname(t.country)}) : nm(t), ok: 0, n: t.ports.length * N, ips: {},
-                 community: !!t.community, control: !!t.control};
+                 community: !!t.community, control: !!t.control, ipblock: !!t.ipblock};
       res.pad = (t.pad || []).map(function(pp){ return {port: pp.port, size: pp.size, ok: 0, n: N}; });
       res.ip = t.ip;
       results.push(res);
@@ -521,6 +522,7 @@ function renderWeb(state){
     row.appendChild(el("span", "sname", r.name));
     row.appendChild(el("b", cls, tt("web_answers", {ok: r.ok, n: r.n})));
     if (r.community) row.appendChild(el("span", "muted small", tt("web_witness")));
+    if (r.ipblock && r.ok === 0) row.appendChild(el("span", "muted small full", tt("web_ipblock")));
     if (seenKnown(r) && !isHome(r.kind) || (seenKnown(r) && r.ok < r.n)) row.appendChild(el("span", "muted small full", r.seen > 0 ? (r.replied > 0 && r.ok < r.n ? tt("web_seen_lost") : tt("web_seen_got")) : tt("web_seen_none")));
     if (r.pad && r.pad.length) row.appendChild(el("span", "muted small full", tt("web_pad", {list: r.pad.map(function(p){ return tt("web_pad_item", {size: p.size, ok: p.ok, n: p.n}); }).join(", ")})));
     tb.appendChild(row);
@@ -619,7 +621,7 @@ function buildComplaint(data){
   var brCut = br && !br.mixed && (br.verdict === "FOREIGN_IN_CUT" || br.verdict === "FOREIGN_PARTIAL");
   if (!nodeCut && !brCut) return null;
   var ru = br ? br.results.filter(function(r){ return isHome(r.kind); }) : [], fr = br ? br.results.filter(function(r){ return !isHome(r.kind); }) : [];
-  var frBad = fr.filter(function(r){ return !r.community && r.ok < r.n * 0.8; });      // свидетелей-добровольцев среди «недоступных» не называем: у них свои причины молчать
+  var frBad = fr.filter(function(r){ return !r.community && !(r.ipblock && r.ok === 0) && r.ok < r.n * 0.8; });      // свидетелей-добровольцев среди «недоступных» не называем: у них свои причины молчать
   var lt = longTerm(), longCut = lt && lt.total >= 5 && lt.cut / lt.total >= 0.8;
   var tf = n && n.tcp_foreign, tcpOk = !!(nodeCut && tf && tf.total >= 3 && tf.ok / tf.total >= 0.9);
   var prov = y.asn ? "AS" + y.asn + " " + (y.org || "") : tt("cm_prov_unknown");
@@ -879,18 +881,43 @@ function jText(e){
   if (e.kind === "size_cut") return tt("j_size", {n: i.browsers || 2, size: i.size || 1200});
   return e.kind;
 }
+// Одинаковые события одной сети (та же сеть, вид и статусы) склеиваем в одну строку на месте самого свежего: «повторов: N, первый …».
+// Сразу показываем JPAGE строк, остальные по кнопке, как у карточек провайдеров.
+var JEV = [], JPAGE = 6, jshown = JPAGE;
+function jGroups(ev){
+  var out = [], idx = {};
+  ev.forEach(function(e){
+    var i = e.info || {}, k = [e.asn, e.kind, e.old || "", e.new || "", i.dir || "", i.size || ""].join("|");
+    if (idx[k] === undefined) { idx[k] = out.length; out.push({e: e, n: 0, first: e.ts}); }
+    else { var g = out[idx[k]]; g.n++; g.first = Math.min(g.first, e.ts); }
+  });
+  return out;
+}
+function renderJournal(){
+  var box = $("jlist"), more = $("jmore"); box.innerHTML = ""; more.innerHTML = ""; more.hidden = true;
+  var gs = jGroups(JEV);
+  gs.slice(0, jshown).forEach(function(g, i){
+    var e = g.e, row = el("div"); row.style.padding = "6px 0";
+    if (i < Math.min(jshown, gs.length) - 1) row.style.borderBottom = "1px solid var(--line)";
+    var who = el("a", null, nm(e)); who.href = LP + "/as" + e.asn; who.style.fontWeight = "600";
+    var t = el("span", "muted", fmtTs(e.ts) + " · "); row.appendChild(t); row.appendChild(who); row.appendChild(document.createTextNode(": " + jText(e)));
+    if (g.n) row.appendChild(el("span", "muted", tt("j_repeat", {n: g.n, ts: fmtTs(g.first)})));
+    box.appendChild(row);
+  });
+  if (gs.length > jshown) {
+    var rest = gs.length - jshown, bt = el("button", "btn ghost more", tt("prov_more")); bt.type = "button";
+    bt.appendChild(el("span", "cnt", tt("prov_more_cnt", {n: Math.min(rest, 10), rest: rest})));
+    bt.addEventListener("click", function(){ jshown += 10; renderJournal(); });
+    more.appendChild(bt); more.hidden = false;
+  }
+}
 function loadJournal(){
   api("GET", "/api/v2/journal").then(function(r){
     var box = $("jlist"); box.innerHTML = "";
     if (r.status !== 200) { box.textContent = tt("journal_error"); return; }
-    var ev = r.body.events || [];
-    if (!ev.length) { box.textContent = tt("journal_empty"); return; }
-    ev.slice(0, 40).forEach(function(e){
-      var row = el("div"); row.style.padding = "6px 0"; row.style.borderBottom = "1px solid var(--line)";
-      var who = el("a", null, nm(e)); who.href = LP + "/as" + e.asn; who.style.fontWeight = "600";
-      var t = el("span", "muted", fmtTs(e.ts) + " · "); row.appendChild(t); row.appendChild(who); row.appendChild(document.createTextNode(": " + jText(e)));
-      box.appendChild(row);
-    });
+    JEV = (r.body.events || []).slice(0, 60);
+    if (!JEV.length) { box.textContent = tt("journal_empty"); return; }
+    renderJournal();
   }).catch(function(){ $("jlist").textContent = tt("journal_error"); });
 }
 var PROV = [], PAGE = 12, pshown = PAGE;
@@ -920,8 +947,6 @@ function loadProviders(){
 }
 $("psearch").addEventListener("input", function(){ pshown = PAGE; renderProviders(); });
 
-var TST = {OK: [tt("tst_ok"), "var(--ok)"], INCUT: [tt("tst_incut"), "var(--bad)"], OUTCUT: [tt("tst_outcut"), "var(--bad)"], PART: [tt("tst_part"), "var(--warn)"],
-           MIXED: [tt("tst_mixed"), "var(--warn)"], LOSSY: [tt("tst_lossy"), "var(--warn)"], NOREPORT: [tt("tst_nodata"), "var(--idle)"]};
 function timeline(series, hours){
   var data = series.slice(-hours), n = data.length, svg = svgEl("svg", {"viewBox": "0 0 " + n + " 40", "class": "tl", "preserveAspectRatio": "none"});
   data.forEach(function(b, i){
@@ -991,24 +1016,6 @@ function showProvider(asn){
       d.journal.forEach(function(e){ var row = el("div", "small"); row.style.padding = "4px 0"; row.textContent = fmtTs(e.ts) + " · " + jText(e); cj.appendChild(row); });
       box.appendChild(cj);
     }
-    var c3 = el("div", "card"); c3.style.marginTop = "12px";
-    c3.appendChild(el("h3", null, tt("pd_servers")));
-    if (!d.targets.length) c3.appendChild(el("div", "muted small", tt("pd_nodata")));
-    d.targets.forEach(function(t){
-      var row = el("div", "trow"), tot = 0, k;
-      for (k in t.status) tot += t.status[k];
-      row.appendChild(el("div", "nm", nm(t) + (isHome(t.kind) ? " " + tt("pd_control") : "")));
-      var bar = el("div", "bar"), legend = [];
-      Object.keys(t.status).sort().forEach(function(k2){
-        var i = el("i"); i.style.width = (t.status[k2] * 100 / tot) + "%"; i.style.background = (TST[k2] || TST.NOREPORT)[1]; bar.appendChild(i);
-        legend.push((TST[k2] || TST.NOREPORT)[0] + " " + t.status[k2]);
-      });
-      row.appendChild(bar);
-      row.appendChild(el("div", "small muted", legend.join(" · ") + (t.tcp_total ? " · " + tt("pd_tcp", {ok: t.tcp_ok, total: t.tcp_total}) : "")));
-      c3.appendChild(row);
-    });
-    box.appendChild(c3);
-
     var c4 = el("div", "card"); c4.style.marginTop = "12px";
     c4.appendChild(el("h3", null, tt("pd_cuts")));
     var any = false;

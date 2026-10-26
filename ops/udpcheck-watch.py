@@ -40,7 +40,9 @@ SITE_DIGEST = os.environ.get("SITE_DIGEST", "1") != "0"
 REBOOT_AFTER_H = int(os.environ.get("WATCH_REBOOT_AFTER_H", "48"))    # сколько часов можно жить с неприменённым обновлением ядра, прежде чем сообщить
 SECUPD_AFTER_H = int(os.environ.get("WATCH_SECUPD_AFTER_H", "72"))    # сколько часов обновления безопасности могут ждать установки
 BANS_SURGE = int(os.environ.get("WATCH_BANS_SURGE", "60"))            # банов fail2ban за час на одном сервере: волна подбора
-SSH_LEARN_H = int(os.environ.get("WATCH_SSH_LEARN_H", "24"))          # первые часы входы по SSH только запоминаем (какие адреса «свои»)
+SSH_LEARN_H = int(os.environ.get("WATCH_SSH_LEARN_H", "24"))
+RKN_ACCEPT_FILE = os.environ.get("WATCH_RKN_ACCEPT_FILE", "/etc/udpcheck-watch.rkn-accept")    # touch: принять текущие тревоги по реестру как известные
+BACKUP_MAX_H = int(os.environ.get("WATCH_BACKUP_MAX_H", "3"))         # копии делаются раз в час: старше 3 часов значит, что они не идут          # первые часы входы по SSH только запоминаем (какие адреса «свои»)
 
 
 def now():
@@ -195,6 +197,76 @@ def host_check(st, health, anchors):
                 notify(st, "Вход по SSH на сервер «%s» с нового адреса %s. Если это вы, ничего делать не нужно. Если нет, срочно сообщите: это может быть чужой доступ." % (name, ip))
 
 
+def _who(v):
+    return ("сервер добровольца %s" if v.get("community") else "сервер проекта «%s»") % v.get("name", "?")
+
+
+def probe_check(st, health):
+    """Здоровье серверов глазами хаба: (A) отвечают ли они хабу по UDP, (B) отвечают ли посетителям, у которых другие серверы отвечают."""
+    pr = health.get("probe") or {}
+    check(st, "probe-hub", bool(pr.get("suspect")), 2,
+          "хаб не получает UDP-ответов от большинства серверов (%s из %s молчат): похоже, дело в самом хабе или его сети. Серверы из проверок не убраны."
+          % (pr.get("failed"), pr.get("total")), "хаб снова получает UDP-ответы от серверов")
+    for code, v in sorted((pr.get("servers") or {}).items()):
+        check(st, "probe:" + code, bool(v.get("down")), 1,
+              "%s не отвечает хабу по UDP (проверок подряд без ответа: %d, проверка раз в 10 мин). Он убран из проверок посетителей и узлов и вернётся сам, когда ответит."
+              % (_who(v), v.get("fails", 0)), "%s снова отвечает по UDP и вернулся в проверки" % _who(v), remind=6 * 3600)
+    for code, v in sorted((health.get("visitors") or {}).items()):
+        why = []
+        if v.get("unseen"):
+            why.append("в %d запросы посетителя до сервера не дошли" % v["unseen"])
+        if v.get("lost"):
+            why.append("в %d сервер ответил, но ответ не дошёл до посетителя" % v["lost"])
+        check(st, "vis:" + code, bool(v.get("bad")), 1,
+              "%s не отвечает посетителям: в %d из %d последних проверок ответа не было, хотя другие серверы у тех же людей отвечали (сетей: %d)%s."
+              % (_who(v), v.get("failed", 0), v.get("checks", 0), v.get("asns", 0), (": " + "; ".join(why)) if why else ""),
+              "%s снова отвечает посетителям" % _who(v), remind=86400)
+
+
+def rkn_check(st, health):
+    """Адреса серверов проекта и реестр блокировок: сам адрес в реестре или соседи по /24 (провайдеры, блокирующие подсетями, режут его целиком)."""
+    rk = health.get("rkn") or {}
+    if not rk.get("enabled"):
+        return
+    age = rk.get("age_s")
+    check(st, "rkn-list", age is None or age > 3 * 86400, 30,
+          "хаб давно не обновлял список реестра блокировок (%s): сверка адресов серверов не работает." % ("ни разу" if age is None else "%d ч назад" % (age // 3600)),
+          "список реестра блокировок снова обновляется", remind=86400)
+    # Известное и принятое владельцем: отметка RKN_ACCEPT_FILE новее прошлой -> текущее состояние «грязных» серверов запоминается, их тревоги
+    # снимаются молча; дальше по ним тревога только если станет хуже (сам адрес попал в реестр или соседей в /24 прибавилось).
+    accepted = st.setdefault("rkn_accept", {})
+    try:
+        mark = os.path.getmtime(RKN_ACCEPT_FILE)
+    except OSError:
+        mark = 0
+    if mark and mark > st.get("rkn_accept_t", 0):
+        took = []
+        for code, v in sorted((rk.get("servers") or {}).items()):
+            if not v.get("community") and v.get("dirty"):
+                accepted[code] = {"listed": bool(v.get("listed")), "neighbors": int(v.get("neighbors", 0))}
+                st["checks"].pop("rkn:" + code, None)
+                took.append("%s (%s)" % (v.get("name"), "сам в реестре" if v.get("listed") else "соседей %d" % v.get("neighbors", 0)))
+        st["rkn_accept_t"] = mark
+        if took:
+            notify(st, "Реестр блокировок: принято как известное, напоминать не буду, сообщу только если станет хуже: " + ", ".join(took) + ".")
+    for code, v in sorted((rk.get("servers") or {}).items()):
+        if v.get("community"):
+            continue          # серверы добровольцев в «грязной» подсети хаб просто не берёт свидетелями
+        bad = bool(v.get("dirty"))
+        a = accepted.get(code)
+        if a is not None:
+            bad = (bool(v.get("listed")) and not a["listed"]) or int(v.get("neighbors", 0)) > a["neighbors"]
+        if v.get("listed"):
+            text = "адрес сервера проекта «%s» в реестре блокировок РКН: в России он недоступен по любому протоколу, его проверки ничего не говорят про UDP." % v.get("name")
+        else:
+            text = ("в подсети сервера проекта «%s» (/24) адресов из реестра блокировок РКН: %d. Провайдеры, которые блокируют подсетями, режут его целиком: "
+                    "у их абонентов он молчит по любому протоколу. Стоит подумать о другом адресе." % (v.get("name"), v.get("neighbors", 0)))
+        if a is not None and bad:
+            text += " Раньше это было принято как известное (%s), теперь хуже." % ("адрес в реестре" if a["listed"] else "соседей было %d" % a["neighbors"])
+        check(st, "rkn:" + code, bad, 1, text, "адрес сервера проекта «%s» больше не задевает реестр блокировок" % v.get("name")
+              if a is None else "по серверу проекта «%s» снова не хуже принятого" % v.get("name"), remind=7 * 86400)
+
+
 def expiry_check(st):
     """Напоминания об окончании аренды серверов: за 7, 3 и 1 день, в день окончания и на следующий день. Список в WATCH_EXPIRY."""
     t = now()
@@ -338,8 +410,12 @@ def run():
               "переноса файл базы остался у root, нужен chown -R на каталог состояния.", "хаб снова пишет в базу", critical=True)
         ba = health.get("backup_age_s")
         if ba is not None:
-            check(st, "backup", ba > 36 * 3600, 1, "последняя резервная копия хаба старше 36 часов (%d ч)." % (ba // 3600), "резервная копия снова свежая")
+            check(st, "backup", ba > BACKUP_MAX_H * 3600, 1, "последняя резервная копия хаба старше %d ч (%d ч): при аварии потеряется больше часа данных."
+                  % (BACKUP_MAX_H, ba // 3600), "резервная копия снова свежая")
         host_check(st, health, nodes.get("anchors", []))
+        if settled:
+            probe_check(st, health)
+            rkn_check(st, health)
         df, ma = health.get("disk_free_pct"), health.get("mem_avail_mb")
         if df is not None:
             check(st, "disk", df < 10, 1, "на хабе мало места на диске (свободно %d%%)." % df, "места на диске хаба снова достаточно")

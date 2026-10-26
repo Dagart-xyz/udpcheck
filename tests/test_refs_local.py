@@ -45,7 +45,7 @@ json.dump(targets, open(tfile, "w"))
 dbfile = os.path.join(tmp, "hub.db")
 SERVER = os.path.join(ROOT, "udpcheck_server.py")
 HUB = "http://127.0.0.1:18080/udpcheck"
-base_env = dict(os.environ, UDPCHECK_TRUSTED_PROXIES="127.0.0.1", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"),
+base_env = dict(os.environ, UDPCHECK_RKN_LIST="", UDPCHECK_TRUSTED_PROXIES="127.0.0.1", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"),
                 UDPCHECK_PROBE_INTERVAL="900", UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX", UDPCHECK_DEV_COUNTRIES="10.1.=ZZ", UDPCHECK_AGENT_FILE=os.path.join(ROOT, "udpcheck_node.py"), UDPCHECK_VOL_EXPLORE="0", UDPCHECK_VOL_CACHE="0", UDPCHECK_REF_MIN_AGE="0", UDPCHECK_REF_MIN_ROUNDS="1", UDPCHECK_TRACEROUTE=os.path.join(HERE, "fake_traceroute.cmd"))
 
 # порты опорного сервера на время теста (боевые 47321/51820 могут быть заняты)

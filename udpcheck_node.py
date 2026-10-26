@@ -69,7 +69,7 @@ MSG = {
         "checking": "  проверяю %s ...",
         "cls_OK": "чисто", "cls_INCUT": "ответы не приходят", "cls_OUTCUT": "до цели не доходит", "cls_LOSSY": "потери выше нормы", "cls_NOREPORT": "цель не отчиталась",
         "st_LOSSY": "проходит, но с потерями выше нормы", "st_OK": "чисто", "st_INCUT": "ответы не приходят", "st_OUTCUT": "до цели не доходит",
-        "st_PART": "проходит только на части портов", "st_MIXED": "смешанно", "st_NOREPORT": "цель не отчиталась",
+        "st_PART": "проходит только на части портов", "st_MIXED": "смешанно", "st_NOREPORT": "цель не отчиталась", "st_IPBLOCK": "адрес недоступен целиком (не проходит и TCP)",
         "place_home": "в вашей стране", "place_foreign": "зарубеж",
         "comm_line": "--- опорный сервер участника %s [%s]: %s, TCP: %s (%s) ---", "comm_control": "входит в итог как контроль", "comm_noverdict": "в итог не входит",
         "target_line": "--- %s [%s]: %s, TCP: %s ---",
@@ -103,7 +103,7 @@ MSG = {
         "checking": "  checking %s ...",
         "cls_OK": "clean", "cls_INCUT": "replies do not arrive", "cls_OUTCUT": "does not reach the target", "cls_LOSSY": "loss above normal", "cls_NOREPORT": "target did not report",
         "st_LOSSY": "passes, but with loss above normal", "st_OK": "clean", "st_INCUT": "replies do not arrive", "st_OUTCUT": "does not reach the target",
-        "st_PART": "passes on some ports only", "st_MIXED": "mixed", "st_NOREPORT": "target did not report",
+        "st_PART": "passes on some ports only", "st_MIXED": "mixed", "st_NOREPORT": "target did not report", "st_IPBLOCK": "address unreachable entirely (TCP does not pass either)",
         "place_home": "in your country", "place_foreign": "abroad",
         "comm_line": "--- volunteer anchor server %s [%s]: %s, TCP: %s (%s) ---", "comm_control": "counted in the verdict as a control", "comm_noverdict": "not counted in the verdict",
         "target_line": "--- %s [%s]: %s, TCP: %s ---",
@@ -616,7 +616,7 @@ def run_task(task):
 
 
 CLS = {k: tr("cls_" + k) for k in ("OK", "INCUT", "OUTCUT", "LOSSY", "NOREPORT")}
-ST = {k: tr("st_" + k) for k in ("LOSSY", "OK", "INCUT", "OUTCUT", "PART", "MIXED", "NOREPORT")}
+ST = {k: tr("st_" + k) for k in ("LOSSY", "OK", "INCUT", "OUTCUT", "PART", "MIXED", "NOREPORT", "IPBLOCK")}
 
 
 def show(resp):

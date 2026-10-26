@@ -1,7 +1,7 @@
 [Unit]
-Description=udpcheck: ежедневная копия хаба в 03:30 по Москве
+Description=udpcheck: копия хаба раз в час (в 17 минут)
 [Timer]
-OnCalendar=*-*-* 03:30:00 Europe/Moscow
+OnCalendar=*-*-* *:17:00
 Persistent=true
 [Install]
 WantedBy=timers.target

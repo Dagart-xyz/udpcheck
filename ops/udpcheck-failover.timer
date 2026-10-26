@@ -1,0 +1,10 @@
+[Unit]
+Description=udpcheck: переключатель хаба раз в минуту
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

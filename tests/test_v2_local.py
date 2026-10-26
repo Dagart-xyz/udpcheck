@@ -176,7 +176,7 @@ json.dump(targets, open(tfile, "w"))
 dbfile = os.path.join(tmp, "hub.db")
 SERVER = os.path.join(ROOT, "udpcheck_server.py")
 HUB = "http://127.0.0.1:18080/udpcheck"
-base_env = dict(os.environ, UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_PROBE_INTERVAL="900",
+base_env = dict(os.environ, UDPCHECK_RKN_LIST="", UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_PROBE_INTERVAL="900",
                 UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX", UDPCHECK_LOGO_DIR=os.path.join(tempfile.gettempdir(), "udpc_logos_test"), UDPCHECK_TRACEROUTE=os.path.join(HERE, "fake_traceroute.cmd"))
 
 
@@ -454,6 +454,8 @@ try:
     check("в статистике нет токенов и позывных", "token" not in json.dumps(stats) and "callsign" not in json.dumps(stats))
 
     print("[карточки и страница провайдера]")
+    if time.time() % 3600 > 3480:      # под конец часа ждём начала следующего (до открытия записи в базу): запись из 25-го часа в сети 64506 не должна попасть в график
+        time.sleep(3600 - time.time() % 3600 + 1)
     dbw = sqlite3.connect(dbfile, timeout=30)
     nowt = int(time.time())
     for i in range(8):   # сеть 64500: 8 замеров «режется» за последние часы, 2 замера «не режется» для другой сети
@@ -469,6 +471,14 @@ try:
     for i in range(2):   # сеть 64504: посетитель из страны без опорных серверов (NO_ANCHOR): список провайдеров не должен падать
         dbw.execute("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)", (nowt - i * 400, 64504, "NO_ANCHOR", "[]", "No Anchor ISP", "c0ffee0000000003"))
     dbw.execute("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)", (nowt, 64505, "NO_BLOCK", "[]", "Fast Hosting Ltd", "c0ffee0000000005"))
+    # сеть 64506: по замеру и проверке сейчас и ещё по одному в 25-м часе (меньше 24 ч назад, но левее графика): «за сутки» их считать нельзя,
+    # иначе посетителей выходит больше, чем всего.
+    for ts_, cid_ in ((nowt, "c0ffee0000000006"), (nowt - 86400 + 60, "c0ffee0000000007")):
+        dbw.execute("INSERT INTO rounds(ts, node_id, asn, verdict, src_same) VALUES(?,?,?,?,?)", (ts_, 902, 64506, "NO_BLOCK", "same"))
+        dbw.execute("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)", (ts_, 64506, "NO_BLOCK", "[]", "Edge ISP", cid_))
+    # сеть 64507: один и тот же браузер в двух разных часах: и на карточке, и на странице провайдера это 2 голоса (раз в час), а не 1 за сутки
+    for ts_ in (nowt, nowt - 3600):
+        dbw.execute("INSERT INTO webchecks(ts, asn, verdict, data, org, cid) VALUES(?,?,?,?,?,?)", (ts_, 64507, "FOREIGN_IN_CUT", "[]", "Hourly ISP", "c0ffee0000000008"))
     dbw.commit()
     dbw.close()
     os.makedirs(os.path.join(tempfile.gettempdir(), "udpc_logos_test"), exist_ok=True)
@@ -487,6 +497,16 @@ try:
     st, pd = api("GET", "/api/v2/providers/64500")
     check("страница провайдера: график за 7 суток, итоги по серверу, TCP", st == 200 and len(pd["series"]) == 168 and pd["targets"] and pd["targets"][0]["tcp_ok"] == 8 and pd["rounds_24h"] == 8, pd)
     check("страница провайдера: неизвестная сеть -> 404", api("GET", "/api/v2/providers/64999")[0] == 404)
+    e6 = byasn.get(64506, {})
+    check("карточка: «за сутки» = 24 столбика графика, запись из 25-го часа не считается (замеров 2, из них посетителей 1)",
+          e6.get("rounds_24h") == 2 and e6.get("web_24h") == 1 and e6.get("nodes") == 1, e6)
+    st, p6 = api("GET", "/api/v2/providers/64506")
+    check("страница провайдера: то же окно у замеров, посетителей, итогов и узлов",
+          st == 200 and p6["rounds_24h"] == 2 and p6["web_24h"] == 1 and p6["verdicts"].get("NO_BLOCK") == 2 and p6["nodes"] == 1, p6)
+    st, p7 = api("GET", "/api/v2/providers/64507")
+    check("браузер в двух часах: на карточке и на странице 2 голоса, посетителей столько же, сколько всего, итоги сходятся",
+          byasn.get(64507, {}).get("web_24h") == 2 and st == 200 and p7["rounds_24h"] == 2 and p7["web_24h"] == 2
+          and p7["web"].get("FOREIGN_IN_CUT") == 2 and p7["verdicts"].get("FOREIGN_IN_CUT") == 2, (byasn.get(64507), p7.get("web"), p7.get("verdicts")))
     flat = json.dumps(pl_) + json.dumps(pd)
     check("в карточках и на странице нет токенов, адресов", all(k not in flat for k in ("token", "127.0.0.1", "callsign\": \"x")))
 

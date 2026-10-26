@@ -8,12 +8,16 @@
   udpcheck-s3 list [ПРЕФИКС]         список объектов (ключ, размер)
   udpcheck-s3 delete КЛЮЧ            удалить
   udpcheck-s3 prune ПРЕФИКС СКОЛЬКО  оставить СКОЛЬКО последних объектов с префиксом, остальные удалить (по имени, имена содержат дату)
+  udpcheck-s3 prune-tiered ПРЕФИКС ЧАСОВ СУТОК
+                                     ступенчато: последние ЧАСОВ копий все, из более старых по одной (последней) на сутки за СУТОК суток;
+                                     объекты, в имени которых нет даты вида ГГГГММДД-ЧЧММ, не трогаются
 
 Настройки берутся из переменных окружения (их кладёт в среду udpcheck-backup из /etc/udpcheck/backup.env):
   S3_ENDPOINT   s3.ru-3.storage.selcloud.ru      S3_REGION   ru-3        S3_BUCKET   имя бакета
   S3_ACCESS_KEY / S3_SECRET_KEY                  S3_SCHEME   https (по умолчанию)   S3_PATHSTYLE=1: адрес вида endpoint/bucket/ключ
 """
 import datetime
+import re
 import hashlib
 import hmac
 import os
@@ -117,12 +121,32 @@ class S3:
             else:
                 return sorted(out)
 
+    def prune_tiered(self, prefix, hours, days):
+        gone = tiered_gone([k for k, _s in self.list(prefix)], hours, days)
+        for k in gone:
+            self.delete(k)
+        return gone
+
     def prune(self, prefix, keep):
         items = self.list(prefix)
         gone = [k for k, _s in items[:-keep]] if keep > 0 and len(items) > keep else []
         for k in gone:
             self.delete(k)
         return gone
+
+
+def tiered_gone(keys, hours, days):
+    """Какие копии удалить при ступенчатом хранении: новейшие hours штук остаются все, из остальных по последней копии на каждые сутки,
+    и только за days самых новых суток среди них. Ключи без даты ГГГГММДД-ЧЧММ в имени не удаляются никогда."""
+    dated = sorted((m.group(1) + m.group(2), k) for k in keys for m in [re.search(r"(\d{8})-(\d{4})", k)] if m)
+    keep = {k for _d, k in dated[-hours:]} if hours > 0 else set()
+    per_day = {}
+    for d, k in dated:
+        if k not in keep:
+            per_day[d[:8]] = k                  # отсортировано по времени: остаётся последняя копия суток
+    for day in sorted(per_day)[-days:] if days > 0 else []:
+        keep.add(per_day[day])
+    return [k for _d, k in dated if k not in keep]
 
 
 def main(argv):
@@ -141,6 +165,9 @@ def main(argv):
     elif cmd == "delete" and len(argv) == 3:
         s3.delete(argv[2])
         print("удалено", argv[2])
+    elif cmd == "prune-tiered" and len(argv) == 5:
+        gone = s3.prune_tiered(argv[2], int(argv[3]), int(argv[4]))
+        print("удалено старых копий: %d" % len(gone))
     elif cmd == "prune" and len(argv) == 4:
         gone = s3.prune(argv[2], int(argv[3]))
         print("удалено старых копий: %d" % len(gone))

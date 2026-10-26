@@ -20,7 +20,7 @@ set -eu
 HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
 ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (checks its own network) | ref (anchor server) | both
 if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # old variable: REF=0 meant "node only"
-AGENT_SHA256="a3192fea3a83c971f370a0c7d448f5d41b78da88ac18952a96452db1d5613f30"
+AGENT_SHA256="f2913f66f5d2983a5367ae16b832f065cc069cba32c2882b21ef1a49c58843c9"
 DIR=/opt/udpcheck-node
 STATE=/var/lib/udpcheck-node
 SVC=udpcheck-node
@@ -201,6 +201,24 @@ pyfetch() {
   python3 -c 'import sys,urllib.request; open(sys.argv[2],"wb").write(urllib.request.urlopen(sys.argv[1], timeout=int(sys.argv[3])).read())' "$1" "$2" "${3:-60}"
 }
 
+start_pause() {
+  [ "${UDPCHECK_YES:-0}" = 1 ] && return 0
+  if ! ( : < /dev/tty ) 2>/dev/null; then
+    say "Starting in 30 seconds. Cancel: Ctrl+C."
+    sleep 30
+    return 0
+  fi
+  say "Starting in 30 seconds. Start now: Enter. Cancel: n and Enter or Ctrl+C."
+  sh -c 'IFS= read -r a < /dev/tty || exit 0; case "$a" in n|N|no|No) exit 5 ;; esac; exit 0' &
+  RP=$!
+  i=0
+  while [ "$i" -lt 30 ] && kill -0 "$RP" 2>/dev/null; do sleep 1; i=$((i + 1)); done
+  kill "$RP" 2>/dev/null || true
+  RC=0; wait "$RP" 2>/dev/null || RC=$?
+  if [ "$RC" = 5 ]; then say "Installation cancelled."; exit 0; fi
+  return 0
+}
+
 openwrt_install() {
   say "udpcheck-node: connecting this router to the UDP check network (OpenWrt)"
   say ""
@@ -216,10 +234,7 @@ openwrt_install() {
   if [ "$FREE" -lt 40000 ] 2>/dev/null; then
     die "not enough space: about $((FREE / 1024)) MB free, at least 40 MB needed. Free up space or attach a USB drive (extroot)."
   fi
-  if [ "${UDPCHECK_YES:-0}" != 1 ]; then
-    say "Starting in 5 seconds. Cancel: Ctrl+C."
-    sleep 5
-  fi
+  start_pause
   say "Updating the package list and installing Python (this may take a few minutes)..."
   PYPKGS="python3-light python3-urllib python3-openssl python3-codecs ca-bundle"
   if command -v apk >/dev/null 2>&1; then
@@ -340,10 +355,7 @@ say "  3. the $SVC service is created: a temporary unprivileged user, outgoing c
 detect_role
 say_role_notice
 say ""
-if [ "${UDPCHECK_YES:-0}" != 1 ]; then
-  say "Starting in 5 seconds. Cancel: Ctrl+C."
-  sleep 5
-fi
+start_pause
 
 py_ok() { command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; }
 

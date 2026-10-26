@@ -147,6 +147,9 @@ VERDICT_TEXT = {
         "CONTROL_BAD": ("UDP до контрольной точки в вашей стране не проходит чисто (статус %(status)s): проблема на линии или на ПК, "
                         "выводы по зарубежным серверам ненадёжны."),
         "NO_FOREIGN": "Зарубежные серверы не дали результата, сравнить UDP нельзя.",
+        "IP_BLOCKED": ("До зарубежных серверов (%(names)s) не проходит ни UDP, ни TCP: режут весь трафик к их адресам (по адресу, подсети "
+                       "или портам), а не только UDP. Про UDP отдельно отсюда судить нельзя."),
+        "IPBLOCK_EXTRA": " Адрес %(names)s недоступен целиком (не проходит и TCP), в вывод про UDP он не входит.",
         "NO_BLOCK": "UDP проходит и внутри страны, и до всех зарубежных серверов: блокировки не обнаружено.%(extra)s",
         "LOSSY_EXTRA": " До %(names)s заметные потери пакетов (случайные потери, не блокировка).",
         "PART_EXTRA": " На части портов у %(names)s ответы изредка проходят: фильтр выборочный.",
@@ -167,6 +170,9 @@ VERDICT_TEXT = {
         "CONTROL_BAD": ("UDP to the control point in your country does not pass cleanly (status %(status)s): the problem is on the line or on your PC, "
                         "so conclusions about foreign servers are unreliable."),
         "NO_FOREIGN": "Foreign servers gave no result, so UDP cannot be compared.",
+        "IP_BLOCKED": ("Neither UDP nor TCP gets through to the foreign servers (%(names)s): all traffic to their addresses is blocked (by address, subnet "
+                       "or ports), not just UDP. Nothing can be said about UDP separately."),
+        "IPBLOCK_EXTRA": " The address of %(names)s is unreachable entirely (TCP does not pass either), so it is left out of the UDP conclusion.",
         "NO_BLOCK": "UDP passes both inside the country and to all foreign servers: no blocking detected.%(extra)s",
         "LOSSY_EXTRA": " Noticeable packet loss towards %(names)s (random loss, not blocking).",
         "PART_EXTRA": " On some ports of %(names)s replies occasionally get through: the filter is selective.",
@@ -191,7 +197,7 @@ def verdict_texts(code, lang, **kw):
 def make_verdict(results, lang="ru"):
     """results: [{code, kind('home'|'foreign'), status}] -> (код, текст на языке lang: ru или en). home: сервер в той же стране, что и проверяемый."""
     vt = lambda code, **kw: verdict_texts(code, lang, **kw)
-    skip = ("NOREPORT", "NOHTTPS")
+    skip = ("NOREPORT", "NOHTTPS", "IPBLOCK")
     if not any(_is_home(r["kind"]) for r in results):
         return "NO_ANCHOR", vt("NO_ANCHOR")
     rus = [r for r in results if _is_home(r["kind"]) and r["status"] not in skip]
@@ -200,9 +206,16 @@ def make_verdict(results, lang="ru"):
         return "CONTROL_DOWN", vt("CONTROL_DOWN")
     if not any(r["status"] in ("OK", "LOSSY") for r in rus):      # контролей в стране может быть несколько: достаточно одного чистого
         return "CONTROL_BAD", vt("CONTROL_BAD", status=rus[0]["status"])
-    if not foreign:
-        return "NO_FOREIGN", vt("NO_FOREIGN")
     names = lambda lst: ", ".join(r["code"] for r in lst)
+    ipb = [r for r in results if not _is_home(r["kind"]) and r["status"] == "IPBLOCK"]
+    if not foreign:
+        return ("IP_BLOCKED", vt("IP_BLOCKED", names=names(ipb))) if ipb else ("NO_FOREIGN", vt("NO_FOREIGN"))
+    code, text = _udp_verdict(foreign, vt, names)
+    return code, text + (vt("IPBLOCK_EXTRA", names=names(ipb)) if ipb else "")
+
+
+def _udp_verdict(foreign, vt, names):
+    """Вывод про UDP по зарубежным серверам, до которых адрес вообще доступен."""
     ok = [r for r in foreign if r["status"] in ("OK", "LOSSY")]      # LOSSY: проходит, но с потерями выше нормы
     lossy = [r for r in foreign if r["status"] == "LOSSY"]
     inn = [r for r in foreign if r["status"] in ("INCUT", "PART")]
@@ -570,7 +583,8 @@ def community_refs(node_id, node_ip, node_asn, node_country=None, need_home=Fals
     need_home: в стране узла нет опорных серверов проекта. Тогда серверы участников из этой страны (из разных сетей)
     становятся контролем «своя страна» (control): они могут только забраковать замер, обвинить провайдера не могут."""
     rows = db_exec(REF_SELECT + "WHERE r.verified = 1 AND n.last_seen >= ?", (int(time.time()) - 180,), many=True)
-    ok = [r for r in rows if r[1] != node_id and r[3] != node_ip and not (node_asn and r[8] == node_asn)]
+    ok = [r for r in rows if r[1] != node_id and r[3] != node_ip and not (node_asn and r[8] == node_asn) and _health_ok("REF-%d" % r[0])
+          and _rkn_clean(r[3])]
     day = int(time.time()) // 86400
     entry = REF_SEEN.get(node_id)
     if entry is None or entry[0] != day:
@@ -657,6 +671,258 @@ def _probe_ref(ip, ports, tcp_port, secret):
     return alive, tcp_ok
 
 
+# ---- здоровье серверов: хаб сам проверяет, что серверы отвечают по UDP (A), и смотрит, отвечают ли они посетителям (B) ----------------------------------
+# A. Раз в HEALTH_EVERY секунд хаб шлёт подписанный UDP-пакет на каждый порт каждого сервера проекта и каждого сервера добровольца, который сейчас на связи.
+#    HEALTH_FAILS неудач подряд: сервер временно не выдаётся ни браузерам, ни узлам; первый ответ возвращает его. Если молчит больше половины
+#    серверов сразу, виноват скорее сам хаб или его сеть: тогда никого не убираем, только сообщаем наблюдателю (probe_suspect).
+HEALTH_EVERY = float(os.environ.get("UDPCHECK_HEALTH_EVERY", "600"))
+HEALTH_FAILS = int(os.environ.get("UDPCHECK_HEALTH_FAILS", "3"))
+HEALTH = {}                  # код сервера -> {name, community, fails, ok_at, tried_at, down_since}
+HEALTH_STATE = {"next": 0.0, "running": False, "suspect": False, "round_at": 0, "failed": 0, "total": 0}
+
+
+def _health_ok(code):
+    """Сервер можно выдавать: хаб не видел HEALTH_FAILS неудач подряд (или ещё не проверял его)."""
+    e = HEALTH.get(code)
+    return e is None or e["fails"] < HEALTH_FAILS
+
+
+def _health_filter(targets):
+    """Серверы проекта без тех, что хаб считает недоступными. Если недоступны все, оставляем как есть: без них проверять не на чем."""
+    ok = [t for t in targets if _health_ok(t["code"])]
+    return ok if ok else list(targets)
+
+
+def _health_candidates():
+    """Что проверять: [(код, имя, участник?, ip, порты, секрет)]. Добровольцы только на связи и проверенные при подключении."""
+    out = [(t["code"], t["name"], False, t["ip"], list(t["ports"]), t["secret"]) for t in TARGETS]
+    for r in db_exec(REF_SELECT + "WHERE r.verified = 1 AND n.last_seen >= ?", (int(time.time()) - 180,), many=True):
+        try:
+            out.append(("REF-%d" % r[0], r[7] or "REF-%d" % r[0], True, r[3], json.loads(r[4]), bytes.fromhex(r[2])))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def health_round(now=None):
+    """Один круг проверки. Серверы проверяются параллельно (неответивший порт занимает до 2,5 с)."""
+    now = time.time() if now is None else now
+    cand = _health_candidates()
+    res = {}
+
+    def one(c):
+        try:
+            res[c[0]] = bool(_probe_ref(c[3], c[4], 0, c[5])[0])
+        except Exception:
+            res[c[0]] = False
+    ths = [threading.Thread(target=one, args=(c,), daemon=True) for c in cand]
+    for th in ths:
+        th.start()
+    for th in ths:
+        th.join(30)
+    failed = sum(1 for c in cand if not res.get(c[0]))
+    suspect = len(cand) >= 3 and failed * 2 > len(cand)
+    with HLOCK:
+        for code, name, comm, _ip, _ports, _sec in cand:
+            e = HEALTH.setdefault(code, {"fails": 0, "ok_at": 0, "tried_at": 0, "down_since": None})
+            e.update(name=name, community=comm, tried_at=int(now))
+            if res.get(code):
+                e.update(fails=0, ok_at=int(now), down_since=None)
+            elif not suspect:
+                e["fails"] += 1
+                if e["fails"] >= HEALTH_FAILS and e["down_since"] is None:
+                    e["down_since"] = int(now)
+        live = {c[0] for c in cand}
+        for code in [k for k, v in HEALTH.items() if k not in live and now - v.get("tried_at", 0) > 86400]:
+            del HEALTH[code]           # доброволец давно не на связи: забываем
+        HEALTH_STATE.update(suspect=suspect, round_at=int(now), failed=failed, total=len(cand))
+    return res
+
+
+def health_tick(now):
+    """Из janitor: пора, значит запускаем круг в отдельном потоке (janitor ждать не должен)."""
+    if HEALTH_EVERY <= 0 or now < HEALTH_STATE["next"] or HEALTH_STATE["running"]:
+        return
+    HEALTH_STATE.update(next=now + HEALTH_EVERY, running=True)
+
+    def run():
+        try:
+            health_round()
+        except Exception:
+            pass
+        finally:
+            HEALTH_STATE["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+
+
+def health_report(now=None):
+    """Для наблюдателя: состояние каждого проверенного сервера. Адресов нет, у добровольцев только позывной."""
+    now = time.time() if now is None else now
+    with HLOCK:
+        items = {code: {"name": e.get("name", code), "community": bool(e.get("community")), "down": e["fails"] >= HEALTH_FAILS,
+                        "fails": e["fails"], "down_min": int((now - e["down_since"]) // 60) if e.get("down_since") else 0,
+                        "ok_age_s": int(now - e["ok_at"]) if e.get("ok_at") else None}
+                 for code, e in HEALTH.items() if now - e.get("tried_at", 0) < 3 * max(HEALTH_EVERY, 60)}
+    return {"servers": items, "suspect": bool(HEALTH_STATE["suspect"]), "failed": HEALTH_STATE["failed"], "total": HEALTH_STATE["total"],
+            "round_age_s": int(now - HEALTH_STATE["round_at"]) if HEALTH_STATE["round_at"] else None}
+
+
+# B. По принятым проверкам посетителей: сервер, который не ответил в большинстве последних проверок, хотя у тех же людей ответили другие серверы,
+#    и такие проверки пришли из нескольких разных сетей. Один провайдер, который режет UDP, сюда не попадёт: нужны разные сети (ASN).
+VIS_LAST = int(os.environ.get("UDPCHECK_VIS_LAST", "12"))        # сколько последних проверок на сервер смотрим (за сутки)
+VIS_MIN = int(os.environ.get("UDPCHECK_VIS_MIN", "6"))           # меньше проверок: судить рано
+VIS_SHARE = float(os.environ.get("UDPCHECK_VIS_SHARE", "0.7"))   # доля проверок без ответа
+VIS_ASNS = int(os.environ.get("UDPCHECK_VIS_ASNS", "3"))         # из скольких разных сетей
+_vis_cache = {"t": 0, "d": {}}
+
+
+def visitor_health(now=None):
+    """Код сервера -> {checks, failed, asns, unseen, lost, bad}. unseen: сервер не получил запросов посетителя (не дошли туда);
+    lost: сервер ответил, а браузер ответа не получил (не дошли обратно). Пересчёт раз в 5 минут."""
+    now = time.time() if now is None else now
+    if now - _vis_cache["t"] < 300:
+        return _vis_cache["d"]
+    per = {}
+    for asn, data in db_exec("SELECT asn, data FROM webchecks WHERE ts >= ? ORDER BY ts DESC", (int(now) - 86400,), many=True):
+        try:
+            res = [r for r in json.loads(data) if isinstance(r, dict) and r.get("code")]
+            good = {str(r["code"]) for r in res if int(r.get("ok", 0)) > 0}
+        except (ValueError, TypeError):
+            continue
+        for r in res:
+            code = str(r["code"])
+            if not good - {code}:
+                continue          # у посетителя не ответил никто другой: это его сеть, про сервер это ничего не говорит
+            e = per.setdefault(code, [])
+            if len(e) < VIS_LAST:
+                e.append((asn, int(r.get("ok", 0)) > 0, int(r.get("seen", -1)), int(r.get("replied", -1))))
+    out = {}
+    for code, e in per.items():
+        bad = [x for x in e if not x[1]]
+        asns = {x[0] for x in bad if x[0]}
+        out[code] = {"checks": len(e), "failed": len(bad), "asns": len(asns), "unseen": sum(1 for x in bad if x[2] == 0),
+                     "lost": sum(1 for x in bad if x[3] > 0),
+                     "bad": len(e) >= VIS_MIN and len(bad) >= VIS_SHARE * len(e) and len(asns) >= VIS_ASNS}
+    _vis_cache.update(t=now, d=out)
+    return out
+
+
+# ---- адреса серверов и реестр блокировок -----------------------------------------------------------------------------------------------------
+# Раз в сутки хаб скачивает список адресов из реестра РКН (по умолчанию сводка antifilter.download, только IPv4) и смотрит, попал ли туда адрес
+# сервера или его соседи по подсети /24. Многие провайдеры блокируют подсетями целиком: тогда сервер недоступен у них по любому протоколу,
+# и его молчание нельзя принимать за порезку UDP. Сервер добровольца в такой подсети свидетелем не берём; про серверы проекта сообщает наблюдатель.
+RKN_URL = os.environ.get("UDPCHECK_RKN_LIST", "https://antifilter.download/list/ip.lst")   # пусто: сверка выключена
+RKN_EVERY = int(os.environ.get("UDPCHECK_RKN_EVERY", "86400"))
+RKN_NEIGHBORS = int(os.environ.get("UDPCHECK_RKN_NEIGHBORS", "1"))    # сколько соседей по /24 в реестре уже делает подсеть «грязной»
+RKN = {"t": 0, "next": 0.0, "running": False, "ips": set(), "p24": {}, "err": None}
+_IPV4 = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
+
+
+def rkn_load_text(text, now=None):
+    """Разобрать список (по адресу в строке; подсети и прочее пропускаем). Слишком короткий список считаем сбоем и не применяем."""
+    ips, p24 = set(), {}
+    for line in text.splitlines():
+        m = _IPV4.match(line.strip())
+        if not m or any(int(x) > 255 for x in m.groups()):
+            continue
+        a = line.strip()
+        if a not in ips:
+            ips.add(a)
+            k = a.rsplit(".", 1)[0]
+            p24[k] = p24.get(k, 0) + 1
+    if len(ips) < 1000:
+        raise ValueError("в списке только %d адресов" % len(ips))
+    with HLOCK:
+        RKN.update(t=int(time.time() if now is None else now), ips=ips, p24=p24, err=None)
+    return len(ips)
+
+
+def rkn_tick(now):
+    """Из janitor: раз в RKN_EVERY скачиваем список в отдельном потоке; при сбое повтор через час, прежний список остаётся."""
+    if not RKN_URL or now < RKN["next"] or RKN["running"]:
+        return
+    RKN.update(next=now + RKN_EVERY, running=True)
+
+    def run():
+        try:
+            req = urllib.request.Request(RKN_URL, headers={"User-Agent": "udpcheck-hub"})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                rkn_load_text(r.read(40 << 20).decode("utf-8", "replace"))
+        except Exception as e:
+            RKN["err"] = e.__class__.__name__
+            RKN["next"] = time.time() + 3600
+        finally:
+            RKN["running"] = False
+    threading.Thread(target=run, daemon=True).start()
+
+
+def rkn_state(ip):
+    """(адрес в реестре?, сколько других адресов его /24 в реестре) или None, если списка ещё нет или адрес не IPv4."""
+    if not RKN["t"] or not ip or not _IPV4.match(ip):
+        return None
+    listed = ip in RKN["ips"]
+    return listed, RKN["p24"].get(ip.rsplit(".", 1)[0], 0) - (1 if listed else 0)
+
+
+def _rkn_clean(ip):
+    """Адрес можно брать свидетелем: сам не в реестре и соседей по /24 в реестре меньше RKN_NEIGHBORS (или списка нет)."""
+    st = rkn_state(ip)
+    return st is None or (not st[0] and st[1] < RKN_NEIGHBORS)
+
+
+def rkn_report(now=None):
+    """Для наблюдателя: серверы проекта и добровольцев на связи, чей адрес или подсеть в реестре. Адресов нет, у добровольцев позывной."""
+    now = time.time() if now is None else now
+    out = {}
+    for t in TARGETS:
+        st = rkn_state(t["ip"])
+        if st:
+            out[t["code"]] = {"name": t["name"], "community": False, "listed": st[0], "neighbors": st[1], "dirty": st[0] or st[1] >= RKN_NEIGHBORS}
+    try:
+        for r in db_exec(REF_SELECT + "WHERE r.verified = 1 AND n.last_seen >= ?", (int(now) - 180,), many=True):
+            st = rkn_state(r[3])
+            if st:
+                out["REF-%d" % r[0]] = {"name": r[7] or "REF-%d" % r[0], "community": True, "listed": st[0], "neighbors": st[1],
+                                        "dirty": st[0] or st[1] >= RKN_NEIGHBORS}
+    except Exception:
+        pass
+    return {"enabled": bool(RKN_URL), "age_s": int(now - RKN["t"]) if RKN["t"] else None, "size": len(RKN["ips"]), "err": RKN["err"], "servers": out}
+
+
+# ---- подсказка для браузера: какие серверы в сети посетителя недоступны целиком ---------------------------------------------------------------
+# Браузер умеет проверить только UDP. Если узлы из той же сети (ASN) за сутки видели сервер недоступным и по TCP (статус IPBLOCK) в большинстве
+# замеров, молчание этого сервера в проверке браузера тоже не считаем порезкой UDP.
+IPBLOCK_MIN = int(os.environ.get("UDPCHECK_IPBLOCK_MIN", "2"))
+_ipb_cache = {}
+
+
+def ipblock_hint(asn, now=None):
+    """Коды серверов проекта, которые узлы сети asn за сутки видели недоступными целиком (не меньше IPBLOCK_MIN раз и в большинстве замеров)."""
+    if not asn:
+        return set()
+    now = time.time() if now is None else now
+    c = _ipb_cache.get(asn)
+    if c and now - c[0] < 300:
+        return c[1]
+    out = set()
+    for tgt, n_all, n_ipb in db_exec("SELECT target, COUNT(*), SUM(status = 'IPBLOCK') FROM tres WHERE asn = ? AND ts >= ? AND target NOT LIKE 'REF-%' "
+                                     "GROUP BY target", (asn, int(now) - 86400), many=True):
+        if (n_ipb or 0) >= IPBLOCK_MIN and n_ipb * 2 > n_all:
+            out.add(tgt)
+    if len(_ipb_cache) > 5000:
+        _ipb_cache.clear()
+    _ipb_cache[asn] = (now, out)
+    return out
+
+
+def _server_names():
+    """Код -> (имя, участник?) для серверов проекта и добровольцев (у добровольцев позывной)."""
+    names = {t["code"]: (t["name"], False) for t in TARGETS}
+    for rid, callsign in db_exec("SELECT r.id, n.callsign FROM refs r JOIN nodes n ON n.id = r.node_id", many=True):
+        names["REF-%d" % rid] = (callsign or "REF-%d" % rid, True)
+    return names
+
+
 def migrate(db):
     """Добавляем колонки, которых нет в базах, созданных прежними версиями."""
     for alter in ("ALTER TABLE nodes ADD COLUMN role TEXT",          # node | ref | both; пусто у старых агентов (= node)
@@ -698,6 +964,8 @@ def init(server_module):
         rl_seen = S.RateLimiter(20, 3600)
         rl_seen_ip = S.RateLimiter(200, 3600)
         S.ON_429 = _count_429
+        HEALTH_STATE["next"] = time.time() + 90        # первый круг проверки серверов: когда они успеют опросить хаб после перезапуска
+        RKN["next"] = time.time() + 120                # список реестра: вскоре после запуска, потом раз в сутки
     if TARGET_ENABLED:
         threading.Thread(target=reporter_loop, daemon=True).start()
         threading.Thread(target=trace_poller_loop, daemon=True).start()
@@ -719,6 +987,14 @@ def janitor():
             pass
         try:
             site_stats_tick(now)
+        except Exception:
+            pass
+        try:
+            health_tick(now)
+        except Exception:
+            pass
+        try:
+            rkn_tick(now)
         except Exception:
             pass
         if now - JOURNAL_STATE["last"] >= JOURNAL_EVERY:
@@ -860,7 +1136,7 @@ def _make_task(node_id, ip):
     except Exception:
         extra = []
     with HLOCK:
-        for t in TARGETS + extra:
+        for t in _health_filter(TARGETS) + extra:          # серверы, которые не отвечают хабу по UDP, узлам не выдаём
             t = dict(t, kind=_kind_rel(t.get("country"), ncountry))      # home/foreign считается относительно страны узла
             taskid = secrets.token_bytes(8)
             targets[t["code"]] = {"taskid": taskid.hex(), "cfg": t, "mac": _mac(b"UDPC2", taskid, t["secret"]).hex(),
@@ -1156,6 +1432,8 @@ def node_result(h, ip, body):
         tcp_state = "NA"
         if tcp:
             tcp_state = "OK" if (tcp.get("down_ok") and tcp.get("up_ok")) else ("ERR" if tcp.get("error") else "CUT")
+        if tcp_state in ("ERR", "CUT") and classes and all(x in ("OUTCUT", "INCUT") for x in classes):
+            status = "IPBLOCK"      # не проходит ни UDP, ни TCP: режут весь трафик к адресу (по IP, подсети или портам), к UDP это не относится
         if not comm or cfg.get("control"):
             verdict_in.append({"code": c, "kind": cfg["kind"], "status": status})   # серверы участников в итог не входят (кроме контроля)
         tstats.append((c, cfg["kind"], status, tcp_state))
@@ -1260,7 +1538,7 @@ def nodes_public(h, ip):
         refinfo = None
         if r is not None:
             ss = refstat.get("REF-%d" % r[1], {})
-            refinfo = {"active": bool(r[2]) and is_on, "country": r[3], "checks": sum(ss.values()), "ok": ss.get("OK", 0)}
+            refinfo = {"active": bool(r[2]) and is_on and _health_ok("REF-%d" % r[1]), "country": r[3], "checks": sum(ss.values()), "ok": ss.get("OK", 0)}
             refs_on += 1 if refinfo["active"] else 0
         is_server = role in ("ref", "both")      # про серверы показываем только позывной, город и страну: хостинг не светим
         entry = {"callsign": callsign, "asn": None if is_server else asn, "org": None if is_server else org,
@@ -2061,7 +2339,19 @@ def web_health(h, ip):
     hosts = {c: dict(v, age_s=int(now - v["seen"])) for c, v in list(HOST.items())}
     return h.send_json(200, {"ok": True, "db_ok": _db_writable(), "uptime_s": int(now - T0), "disk_free_pct": disk, "mem_avail_mb": mem, "backup_age_s": bage,
                              "anchors_online": alive, "anchors_total": len(TARGETS), "hosts": hosts,
-                             "watcher_beat_age_s": int(now - BEAT["last"]) if BEAT["last"] else None})
+                             "watcher_beat_age_s": int(now - BEAT["last"]) if BEAT["last"] else None,
+                             "probe": health_report(now), "visitors": _visitors_report(now), "rkn": rkn_report(now)})
+
+
+def _visitors_report(now):
+    """Часть B для наблюдателя: оценка по проверкам посетителей с именами серверов (у добровольцев позывной)."""
+    try:
+        vh = visitor_health(now)
+        names = _server_names()
+    except Exception:
+        return {}
+    return {code: dict(v, name=names.get(code, (code, code.startswith("REF-")))[0], community=names.get(code, (code, code.startswith("REF-")))[1])
+            for code, v in vh.items() if code in names}
 
 
 def web_beat(h, body):
@@ -2189,16 +2479,17 @@ def providers_list(h, ip):
     for a, hr, v, c in db_exec("SELECT asn, ts/3600, verdict, COUNT(DISTINCT COALESCE(cid, 'i' || id)) FROM webchecks WHERE ts>=? AND asn IS NOT NULL GROUP BY asn, ts/3600, verdict",
                                (now - 24 * 3600,), many=True):
         by.setdefault(a, []).append((hr, v, c))        # проверка посетителя считается как один замер
-        web24[a] = web24.get(a, 0) + c
+        if hr > hour_now - 24:                          # «за сутки» = те же 24 столбика, что на графике, иначе посетителей бывает больше, чем всего
+            web24[a] = web24.get(a, 0) + c
     r1h = {a: n for a, n in db_exec("SELECT asn, COUNT(*) FROM rounds WHERE ts>=? AND asn IS NOT NULL AND verdict != 'TUNNEL' GROUP BY asn",
                                     (now - 3600,), many=True)}
     for a, n in db_exec("SELECT asn, COUNT(DISTINCT COALESCE(cid, 'i' || id)) FROM webchecks WHERE ts>=? AND asn IS NOT NULL GROUP BY asn", (now - 3600,), many=True):
         r1h[a] = r1h.get(a, 0) + n
     nodes24 = {a: n for a, n in db_exec("SELECT asn, COUNT(DISTINCT node_id) FROM rounds WHERE ts>=? AND asn IS NOT NULL AND verdict != 'TUNNEL' GROUP BY asn",
-                                        (now - 24 * 3600,), many=True)}
+                                        ((hour_now - 23) * 3600,), many=True)}
     orgs = {a: o for a, o in db_exec("SELECT asn, MAX(org) FROM webchecks WHERE asn IS NOT NULL AND org IS NOT NULL GROUP BY asn", many=True)}
     orgs.update({a: o for a, o in db_exec("SELECT asn, MAX(org) FROM nodes WHERE asn IS NOT NULL GROUP BY asn", many=True) if o})
-    size = _size_scan(now - 24 * 3600)
+    size = _size_scan((hour_now - 23) * 3600 - 1)        # ts > since: минус секунда, чтобы окно совпало с графиком
     groups = {}
     for asn in seen:
         k, gname = provider_group(asn, orgs.get(asn))
@@ -2249,11 +2540,12 @@ def provider_detail(h, ip, asn):
     bk = _hour_buckets(rows, hour_now, 168)
     st, old = status_from(bk)
     day = bk[-24:]
+    day0 = (hour_now - 23) * 3600          # «за сутки» везде = те же 24 часовых столбика, что на графике (текущий час и 23 прошлых)
     verdicts = {v: n for v, n in db_exec("SELECT verdict, COUNT(*) FROM rounds WHERE asn IN (%s) AND ts>=? AND verdict != 'TUNNEL' GROUP BY verdict" % ph,
-                                         A + (now - 86400,), many=True)}
+                                         A + (day0,), many=True)}
     targets = {}
     for tgt, kind, status, tcp, n in db_exec("SELECT target, kind, status, tcp, COUNT(*) FROM tres WHERE asn IN (%s) AND ts>=? AND target NOT LIKE 'REF-%%' "
-                                             "GROUP BY target, kind, status, tcp" % ph, A + (now - 86400,), many=True):
+                                             "GROUP BY target, kind, status, tcp" % ph, A + (day0,), many=True):
         kind = "foreign" if kind == "foreign" else "home"
         e = targets.setdefault(tgt, {"code": tgt, "kind": kind, "name": next((t["name"] for t in TARGETS if t["code"] == tgt), tgt),
                                      "name_en": next((t["name_en"] for t in TARGETS if t["code"] == tgt), tgt),
@@ -2268,8 +2560,9 @@ def provider_detail(h, ip, asn):
         cuts.setdefault("foreign" if kind == "foreign" else "home", []).append({"asn": last_asn, "org": org, "n": n})
     for k in cuts:
         cuts[k] = sorted(cuts[k], key=lambda x: -x["n"])[:5]
-    web = {v: n for v, n in db_exec("SELECT verdict, COUNT(DISTINCT COALESCE(cid, 'i' || id)) FROM webchecks WHERE asn IN (%s) AND ts>=? GROUP BY verdict" % ph,
-                                    A + (now - 86400,), many=True)}
+    # браузер голосует раз в час, как в графике и на карточке: иначе посетителей за сутки выходит меньше, чем таких же проверок в «за сутки»
+    web = {v: n for v, n in db_exec("SELECT verdict, SUM(n) FROM (SELECT ts/3600 AS hr, verdict, COUNT(DISTINCT COALESCE(cid, 'i' || id)) AS n FROM webchecks "
+                                    "WHERE asn IN (%s) AND ts>=? GROUP BY hr, verdict) GROUP BY verdict" % ph, A + (day0,), many=True)}
     for v, n in web.items():
         verdicts[v] = verdicts.get(v, 0) + n
     nodes = [{"callsign": c, "online": now - (ls or 0) < 120, "os": "Windows" if "Windows" in (cl or "") else ("macOS" if "Darwin" in (cl or "") else "Linux")}
@@ -2277,10 +2570,10 @@ def provider_detail(h, ip, asn):
                                       "ORDER BY last_seen DESC LIMIT 30" % ph, A + (now - NODE_VISIBLE_DAYS * 86400,), many=True)]
     org, pcountry = db_exec("SELECT MAX(org), MAX(country) FROM nodes WHERE asn=?", (asn,), one=True)
     org = org or db_exec("SELECT MAX(org) FROM webchecks WHERE asn=?", (asn,), one=True)[0]
-    nn = db_exec("SELECT COUNT(DISTINCT node_id) FROM rounds WHERE asn IN (%s) AND ts>=? AND verdict != 'TUNNEL'" % ph, A + (now - 86400,), one=True)[0]
+    nn = db_exec("SELECT COUNT(DISTINCT node_id) FROM rounds WHERE asn IN (%s) AND ts>=? AND verdict != 'TUNNEL'" % ph, A + (day0,), one=True)[0]
     r24 = sum(b["cut"] + b["ok"] + b["bad"] + b["na"] for b in day)
     name = provider_name(asn, org)
-    sz = _size_sum(_size_scan(now - 86400, asn=set(asns)), asns)
+    sz = _size_sum(_size_scan(day0 - 1, asn=set(asns)), asns)
     return h.send_json(200, {
         "asn": asn, "asns": asns if len(asns) > 1 else None, "name": name, "name_en": en_name(name), "org": public_org(asn, org), "country": pcountry, "status": st, "old": old,
         "kind": provider_kind(asn, org, name), "weak": int(r24) < 5, "nodes": nn, "web_24h": sum(web.values()), "logo": provider_logo(asn),
@@ -2479,7 +2772,7 @@ def web_stunseen_start(h, ip):
     with HLOCK:
         if len(SEEN) >= 3000:
             return h.err(503, "сервер занят, повторите позже", 30)
-        SEEN[sid] = {"ip": ip, "created": time.time(), "targets": {t["code"]: None for t in TARGETS}, "sent": {}}
+        SEEN[sid] = {"ip": ip, "created": time.time(), "targets": {t["code"]: None for t in _health_filter(TARGETS)}, "sent": {}}
     return h.send_json(202, {"id": sid})
 
 
@@ -2508,7 +2801,7 @@ def web_ip(h, ip):
     return h.send_json(200, {"ip": ip})      # посетителю про его же адрес; установщик по нему определяет, публичный ли у машины IP
 
 
-WEB_VERDICTS = ("NO_BLOCK", "FOREIGN_IN_CUT", "FOREIGN_OUT_CUT", "FOREIGN_PARTIAL", "CONTROL_BAD", "NO_ANCHOR")
+WEB_VERDICTS = ("NO_BLOCK", "FOREIGN_IN_CUT", "FOREIGN_OUT_CUT", "FOREIGN_PARTIAL", "CONTROL_BAD", "NO_ANCHOR", "IP_BLOCKED")
 STUN_PORTS = [777, 47321]   # 993 не берём: Chrome считает его «небезопасным» портом
 
 
@@ -2548,7 +2841,7 @@ def _community_for_browser(ip, vasn, vc):
         if a:
             ours_asn.add(a)
     home_project = any(t.get("country") and t["country"] == vc for t in TARGETS)
-    cand = [r for r in rows if r[3] != ip and not (vasn and r[8] == vasn)]
+    cand = [r for r in rows if r[3] != ip and not (vasn and r[8] == vasn) and _health_ok("REF-%d" % r[0]) and _rkn_clean(r[3])]
     hs = _vol_stats()
     # сервер, до которого почти никто из посетителей не достаёт (например, адрес VPN в списках блокировок), не показываем, лишь изредка проверяем заново
     cand = [r for r in cand if not (hs.get("REF-%d" % r[0], [0, 0])[0] >= 6 and hs["REF-%d" % r[0]][1] < 0.1 * hs["REF-%d" % r[0]][0])
@@ -2577,7 +2870,14 @@ def web_stun(h, ip):
         return h.err(429, "слишком часто", retry)
     vasn, _org, vc, _city = _geo_of(ip)
     targets = [{"code": t["code"], "kind": _kind_rel(t.get("country"), vc), "name": t["name"], "name_en": t["name_en"], "ip": t["ip"],
-                "ports": [p for p in t["ports"] if p in STUN_PORTS]} for t in TARGETS]
+                "ports": [p for p in t["ports"] if p in STUN_PORTS]} for t in _health_filter(TARGETS)]
+    try:
+        ipb = ipblock_hint(vasn)
+    except Exception:
+        ipb = set()
+    for t in targets:
+        if t["code"] in ipb:
+            t["ipblock"] = True        # узлы этой сети видят адрес недоступным целиком: его молчание не про UDP
     if ip and any(TARGET_PAD.get(t["code"]) for t in TARGETS):
         # просим серверы разрешить этому посетителю длинные ответы и ждём подтверждения (адрес подтверждён: он пришёл к нам по TCP)
         jid = secrets.token_hex(8)

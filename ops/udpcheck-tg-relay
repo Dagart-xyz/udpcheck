@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 UDPcheck authors
+"""udpcheck-tg-relay: пересылка оповещений из ntfy в Telegram. Работает там, откуда Telegram доступен, раз в минуту по таймеру.
+
+Если Telegram недоступен с сервера, где работают наблюдатель или переключатель, они шлют оповещения в свой топик ntfy. Эта служба забирает
+новые сообщения топика (запрос ntfy с poll=1 и since=<id последнего пересланного>) и отправляет их в Telegram. Входящие порты не нужны.
+Пересланным считается только то, что Telegram принял: при ошибке то же сообщение уйдёт в следующую минуту.
+Настройки: файл с NTFY_TOPIC, TG_TOKEN, TG_CHAT (тот же /etc/udpcheck-watch.env, через LoadCredential relay.env).
+Команды: run (шаг по таймеру), status.
+"""
+import json
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+CONF_PATHS = (os.path.join(os.environ.get("CREDENTIALS_DIRECTORY", ""), "relay.env"), "/etc/udpcheck-watch.env")
+STATE = os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/udpcheck-tg-relay"), "state.json")
+NTFY = os.environ.get("NTFY_BASE", "https://ntfy.sh")
+FIRST_SINCE = "10m"          # первый запуск: не пересылать старую историю топика, только последние минуты
+MAX_PER_RUN = 20
+
+
+def read_env(path):
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return out
+
+
+def load_conf():
+    for p in CONF_PATHS:
+        if p and os.path.exists(p):
+            return read_env(p)
+    return {}
+
+
+def fetch(topic, since, timeout=20):
+    """Новые события топика: [{"id", "time", "event", "message", "title"}], старые первыми."""
+    url = "%s/%s/json?poll=1&since=%s" % (NTFY, urllib.parse.quote(topic, safe=""), urllib.parse.quote(since, safe=""))
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "udpcheck-tg-relay"}), timeout=timeout) as r:
+        lines = r.read(2 << 20).decode("utf-8", "replace").splitlines()
+    out = []
+    for line in lines:
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("event") == "message" and ev.get("id"):
+            out.append(ev)
+    return out
+
+
+def send_tg(token, chat, text, timeout=20):
+    body = urllib.parse.urlencode({"chat_id": chat, "text": text[:4000]}).encode()
+    with urllib.request.urlopen(urllib.request.Request("https://api.telegram.org/bot%s/sendMessage" % token, data=body), timeout=timeout) as r:
+        return r.status == 200
+
+
+def step(conf, st, fetch_fn=fetch, send_fn=send_tg, now=None):
+    topic, token, chat = conf.get("NTFY_TOPIC", ""), conf.get("TG_TOKEN", ""), conf.get("TG_CHAT", "")
+    if not (topic and token and chat):
+        return "не настроено: нужны NTFY_TOPIC, TG_TOKEN и TG_CHAT"
+    try:
+        events = fetch_fn(topic, st.get("last") or FIRST_SINCE)
+    except Exception as e:
+        return "ntfy недоступен: %s" % e.__class__.__name__
+    sent = 0
+    for ev in events[:MAX_PER_RUN]:
+        text = ev.get("message") or ""
+        try:
+            ok = send_fn(token, chat, text)
+        except Exception:
+            ok = False
+        if not ok:
+            return "переслано %d, Telegram не принял: повторю в следующий раз" % sent
+        st["last"] = ev["id"]
+        sent += 1
+    if not events and not st.get("last"):
+        # дальше читаем с этого момента (метка времени, а не «последние 10 минут»: сообщение, которое Telegram долго не принимает, не выпадет из окна)
+        st["last"] = str(int(time.time() if now is None else now))
+    return "переслано %d" % sent
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    try:
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        with open(STATE + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(st, fh)
+        os.replace(STATE + ".tmp", STATE)
+    except OSError:
+        pass
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "run"
+    st = load_state()
+    if cmd == "status":
+        print(json.dumps(st, ensure_ascii=False))
+        return 0
+    if cmd != "run":
+        print(__doc__)
+        return 2
+    print(step(load_conf(), st), flush=True)
+    save_state(st)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

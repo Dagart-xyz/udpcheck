@@ -30,7 +30,7 @@ json.dump([{"code": "RU-T", "name": "ru test", "country": "XX", "ip": "127.0.0.1
            {"code": "F-T", "name": "foreign test", "country": "YY", "ip": "127.0.0.1", "ports": [29993, 29777, 29321], "secret": secB, "tcp_port": 28443}], open(tfile, "w"))
 HUB = "http://127.0.0.1:18080/udpcheck"
 BEAT = "b" * 32
-env = dict(os.environ, UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX",
+env = dict(os.environ, UDPCHECK_RKN_LIST="", UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX",
            UDPCHECK_HTTP_PORT="18080", UDPCHECK_UDP_BIND="127.0.0.1", UDPCHECK_UDP_PORTS="19993,19777,19321", UDPCHECK_TARGET_ID="RU-T",
            UDPCHECK_TARGET_SECRET=secA, UDPCHECK_HUB_URL=HUB, UDPCHECK_TARGET_TCP_PORT="18443", UDPCHECK_HUB_DB=os.path.join(tmp, "hub.db"),
            UDPCHECK_HUB_TARGETS=tfile, UDPCHECK_BEAT_SECRET=BEAT, UDPCHECK_BACKUP_MARK=os.path.join(tmp, "last_backup"),
