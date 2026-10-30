@@ -13,15 +13,19 @@
                                      объекты, в имени которых нет даты вида ГГГГММДД-ЧЧММ, не трогаются
 
 Настройки берутся из переменных окружения (их кладёт в среду udpcheck-backup из /etc/udpcheck/backup.env):
-  S3_ENDPOINT   s3.ru-3.storage.selcloud.ru      S3_REGION   ru-3        S3_BUCKET   имя бакета
+  S3_ENDPOINT   s3.example.com                   S3_REGION   region      S3_BUCKET   имя бакета
   S3_ACCESS_KEY / S3_SECRET_KEY                  S3_SCHEME   https (по умолчанию)   S3_PATHSTYLE=1: адрес вида endpoint/bucket/ключ
+  Только для put: S3_PUT_TRIES   сколько попыток (по умолчанию 1); повторяются зависание, обрыв связи и ответы 5xx, но не 4xx
+                  S3_PUT_TIMEOUT сколько секунд ждать без движения (по умолчанию 120)    S3_PUT_PAUSE  пауза между попытками, с (60)
 """
 import datetime
+import http.client
 import re
 import hashlib
 import hmac
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -86,10 +90,20 @@ class S3:
 
     def put(self, path, key):
         data = open(path, "rb").read()
-        st, body = self.request("PUT", key, body=data)
-        if st not in (200, 201):
-            sys.exit("загрузка не удалась: %d %s" % (st, body[:300].decode("utf-8", "replace")))
-        return len(data)
+        e = os.environ
+        tries, timeout, pause = max(1, int(e.get("S3_PUT_TRIES", "1"))), float(e.get("S3_PUT_TIMEOUT", "120")), float(e.get("S3_PUT_PAUSE", "60"))
+        for n in range(1, tries + 1):
+            try:
+                st, body = self.request("PUT", key, body=data, timeout=timeout)
+                why = "%d %s" % (st, body[:300].decode("utf-8", "replace"))
+            except (OSError, http.client.HTTPException) as ex:      # зависание (таймаут), обрыв, отказ в соединении: сеть, а не ответ хранилища
+                st, why = None, "%s: %s" % (type(ex).__name__, ex)
+            if st in (200, 201):
+                return len(data)
+            if n == tries or (st is not None and st < 500):          # 4xx (доступ, подпись, нет бакета) повтором не лечится
+                sys.exit("загрузка не удалась (попытка %d из %d): %s" % (n, tries, why))
+            print("загрузка не удалась (попытка %d из %d): %s; повтор через %g с" % (n, tries, why, pause), file=sys.stderr, flush=True)
+            time.sleep(pause)
 
     def get(self, key, path):
         st, body = self.request("GET", key)

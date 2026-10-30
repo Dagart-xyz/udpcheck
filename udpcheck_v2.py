@@ -1594,7 +1594,7 @@ def _is_person(text):
 
 
 # Слова, по которым видно, что это не имя человека. Организация из whois без правовой формы и без таких слов, из двух-трёх слов с большой буквы
-# («Alexey Geiner», «Иван Петров»), считается физическим лицом: публично его не называем.
+# («Ivan Smirnov», «Иван Петров»), считается физическим лицом: публично его не называем.
 BUSINESS_WORDS = set("""telecom telecommunication telecommunications communications communication network networks net internet online host hosting cloud data datacenter
 center centre group holding systems system service services solutions technologies technology tech digital link web server servers cable wifi radio media soft software
 bank university institute state company corporation business global international security labs lab connect broadband vpn vps mobile wireless fiber fibre electric power
@@ -1760,12 +1760,13 @@ def provider_group(asn, org=None):
     desc = _asn_name(asn)
     if _names["data"].get(str(asn)):
         name = _names["data"][str(asn)]
+        text = name           # имя задано вручную: бренд ищем только в нём (в описании сети бывают перечислены вышестоящие: «Megafon, TTK»)
     elif _is_person_org(org) or _is_person(desc):
         return ("asn:%d" % asn, "Частный провайдер AS%d" % asn)
     else:
         c1, c2 = clean_name(desc), clean_name(org)
         name = c1 if not _bad_name(c1) else (c2 if not _bad_name(c2, strict=False) else ("AS%d" % asn))
-    text = " ".join([str(org or ""), str(desc or ""), name])
+        text = " ".join([str(org or ""), str(desc or ""), name])
     for bname, pats in _brands["data"]:
         if any(p.search(text) for p in pats):
             return ("b:" + bname, bname)
@@ -2162,14 +2163,58 @@ def _db_writable():
 
 # ---- обезличенные счётчики сайта --------------------------------------------------------------------------------------------------------------
 # Что считаем: сколько раз загружена страница (запрос списка провайдеров делает JS страницы), сколько нажатий «Проверить» (запуск трассировки), сколько разных
-# браузеров за сутки (хэш «суточная соль + случайный номер браузера», сам номер и хэш на диск не пишутся, в базе только число) и сколько запросов Caddy
+# браузеров за сутки (хэш «суточная соль + случайный номер браузера», сам номер и хэш на диск не пишутся, в базе только число; чтобы перезапуск хаба не
+# обнулял набор, хэши за текущие сутки лежат в RuntimeDirectory службы, это /run, в памяти, переживает перезапуск, но не перезагрузку) и сколько запросов Caddy
 # ответил не успехом (404 от сканеров, 429, 5xx), а ответы 429 самого хаба ещё и по имени запроса («providers/*», «web/trace»: без номеров, токенов и адресов).
 # Адресов, заголовков и полных путей нет. Сутки по Москве. Смотреть: GET /api/v2/stats/site (с секретом наблюдателя).
 SITE_CNT = {}                                  # (сутки, ключ) -> сколько прибавить к базе
 SITE_UNIQ = {"day": "", "set": set()}
-SITE_STATE = {"flush": 0.0, "caddy": 0.0}
+SITE_STATE = {"flush": 0.0, "caddy": 0.0, "uniq_loaded": False, "uniq_saved": ("", -1)}
 SITE_LOCK = threading.Lock()
 SITE_UNIQ_MAX = 100000
+SITE_UNIQ_FILE = "site-browsers.bin"          # 10 байт даты, затем хэши по 8 байт
+
+
+def _uniq_path():
+    d = (os.environ.get("RUNTIME_DIRECTORY") or "").split(os.pathsep)[0]   # задаёт systemd по RuntimeDirectory= (несколько папок через «:»); без него набор только в процессе
+    return os.path.join(d, SITE_UNIQ_FILE) if d else ""
+
+
+def _uniq_boot():
+    """Один раз после запуска: дополнить набор браузеров сохранённым за сегодня. Чужие сутки и испорченный файл пропускаем."""
+    if SITE_STATE["uniq_loaded"]:
+        return
+    with SITE_LOCK:                          # под замком: запись раз в минуту не сохранит урезанный набор, пока этот читается
+        if SITE_STATE["uniq_loaded"]:
+            return
+        SITE_STATE["uniq_loaded"] = True
+        p = _uniq_path()
+        if not p:
+            return
+        try:
+            with open(p, "rb") as fh:
+                raw = fh.read(10 + 8 * SITE_UNIQ_MAX + 1)
+        except OSError:
+            return
+        day = raw[:10].decode("ascii", "replace")
+        if day != _msk_day() or len(raw) <= 10 or (len(raw) - 10) % 8 or len(raw) > 10 + 8 * SITE_UNIQ_MAX or SITE_UNIQ["day"] not in ("", day):
+            return
+        SITE_UNIQ["day"] = day
+        SITE_UNIQ["set"].update(raw[i:i + 8] for i in range(10, len(raw), 8))
+
+
+def _uniq_save(day, data):
+    p = _uniq_path()
+    if not p:
+        return
+    try:
+        t = p + ".tmp"
+        fd = os.open(t, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(day.encode("ascii") + data)
+        os.replace(t, p)
+    except OSError:
+        pass
 
 
 def _msk_day(t=None):
@@ -2196,6 +2241,7 @@ def _count_429(h):
 def site_count(key, h=None, n=1):
     """Прибавить к счётчику суток; если передан запрос с номером браузера, учесть браузер среди уникальных за сутки."""
     d = _msk_day()
+    _uniq_boot()
     with SITE_LOCK:
         SITE_CNT[(d, key)] = SITE_CNT.get((d, key), 0) + n
         if h is not None:
@@ -2244,10 +2290,15 @@ def site_stats_tick(now):
     if now - SITE_STATE["flush"] < 60:
         return
     SITE_STATE["flush"] = now
+    _uniq_boot()
     with SITE_LOCK:
         cnt = dict(SITE_CNT)
         SITE_CNT.clear()
         uniq = (SITE_UNIQ["day"], len(SITE_UNIQ["set"]))
+        snap = b"".join(SITE_UNIQ["set"]) if uniq[0] and uniq != SITE_STATE["uniq_saved"] else None
+    if snap is not None:                     # набор изменился: копия в /run (раз в минуту, не чаще)
+        _uniq_save(uniq[0], snap)
+        SITE_STATE["uniq_saved"] = uniq
     try:
         for (d, k), n in cnt.items():
             db_exec("INSERT INTO sitestats(day, k, n) VALUES(?, ?, ?) ON CONFLICT(day, k) DO UPDATE SET n = n + excluded.n", (d, k, n))

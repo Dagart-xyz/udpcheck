@@ -69,12 +69,12 @@ for raw, want in cases.items():
 check("длинное название обрезается по слову", len(cn("SCIENTIFIC RESEARCH INSTITUTE FOR SYSTEM ANALYSIS OF THE NATIONAL RESEARCH CENTER KURCHATOV INSTITUTE")) <= 43)
 check("мусорные названия отвергаются", all(V._bad_name(x) for x in ("to AS51765 announce AS207569", "Retail", "Uplinks", "AS56971 Cloud", "ab")))
 check("обычное имя не отвергается", not V._bad_name("Seven Sky"))
-check("частное лицо распознаётся (в том числе по отчеству)", V._is_person("Individual Entrepreneur Lukyanov Maksim") and V._is_person("Baykov Ilya Sergeevich")
+check("частное лицо распознаётся (в том числе по отчеству)", V._is_person("Individual Entrepreneur Petrov Ivan") and V._is_person("Kozlov Pavel Andreevich")
       and not V._is_person("PJSC Rostelecom") and not V._is_person("Seven Sky"))
 check("название из заглавных с предлогом", V.clean_name("SCIENTIFIC RESEARCH INSTITUTE FOR SYSTEM ANALYSIS OF THE NATIONAL").startswith("Scientific Research Institute for System"))
 
 print("[бренды и группы]")
-V._asn_cache.update({12389: "", 42610: "", 25490: "", 41733: "", 51570: "", 16345: "", 8402: "", 8359: "", 197023: "", 31213: "", 35807: "SkyNet", 29124: "Seven Sky"})
+V._asn_cache.update({12389: "", 42610: "", 25490: "", 41733: "", 51570: "", 16345: "", 8402: "", 8359: "", 197023: "", 31213: "", 35807: "SkyNet", 29124: "Seven Sky", 20485: "", 206448: ""})
 for a, org in ((12389, "PJSC Rostelecom"), (42610, "PJSC Rostelecom"), (25490, "PJSC Rostelecom")):
     V._org_cache["data"][a] = org
 V._org_cache.update(t=10 ** 12)
@@ -87,12 +87,14 @@ check("МТС и «MTS Belgorod branch» вместе", g(8359, "MTS PJSC")[0] =
 check("МегаФон отдельно от МТС", g(31213, "PJSC MegaFon")[0] != g(8359, "MTS PJSC")[0])
 check("ЭР-Телеком слитно и дефисом тоже Дом.ру", "Дом.ру" in g(41733, "ERTELECOM-AS")[1] and "Дом.ру" in g(41733, "ER-TELECOM-HOLDING")[1])
 check("«Sever Telecom» не ЭР-Телеком (шаблон не ловит часть слова)", "Дом.ру" not in g(29124, "Sever Telecom JSC")[1], g(29124, "Sever Telecom JSC"))
+check("ТТК ловится, а «SouthTransTelecom» (Крым) не ТТК", g(20485, "Joint Stock Company TransTeleCom")[1] == "ТТК" and g(206448, 'LLC "SouthTransTelecom"')[1] != "ТТК",
+      (g(20485, "Joint Stock Company TransTeleCom"), g(206448, 'LLC "SouthTransTelecom"')))
 check("SkyNet и Seven Sky не склеиваются", g(35807, "SkyNet Ltd.")[0] != g(29124, "Seven Sky")[0])
-check("частное лицо: публично имени нет, имя «Частный провайдер»", g(196949, "Natalia Sergeevna Filicheva")[1].startswith("Частный провайдер") and V.public_org(35420, "Individual Entrepreneur Lukyanov Maksim") is None)
+check("частное лицо: публично имени нет, имя «Частный провайдер»", g(196949, "Anna Ivanovna Petrova")[1].startswith("Частный провайдер") and V.public_org(35420, "Individual Entrepreneur Petrov Ivan") is None)
 check("обычная организация показывается", V.public_org(35807, "SkyNet Ltd.") == "SkyNet Ltd.")
 
 print("[физические лица в организации]")
-for t, want in (("Alexey Geiner", True), ("Paul Sagov", True), ("Иван Петров", True), ("Tabunscic Anatoli", True), ("Baykov Ilya Sergeevich", True),
+for t, want in (("Ivan Smirnov", True), ("Oleg Volkov", True), ("Иван Петров", True), ("Popescu Andrei", True), ("Kozlov Pavel Andreevich", True),
                 ("PE Ivanova Maria", True), ("IP Petrov Ivan", True), ("PE Telecom Service", False), ("PE Kvant", False),
                 ("Ivan P. Sidorov", True), ("P.A.K.T", False), ("Serv.Host Group", False),
                 ("Home Internet", False), ("Orange Business Services", False), ("Microsoft Corporation", False), ("Hurricane Electric", False),
@@ -100,10 +102,18 @@ for t, want in (("Alexey Geiner", True), ("Paul Sagov", True), ("Иван Пет
     check("похоже на человека? %s -> %s" % (t, want), V.looks_like_person_org(t) == want)
 json.dump({"196949": "Частный провайдер AS196949", "219095": "Astra VPS"}, open(os.path.join(tmp, "names.json"), "w", encoding="utf-8"), ensure_ascii=False)
 V._names["mtime"] = 0
-V._org_cache.update(t=time.time(), data={204161: "Alexey Geiner", 219095: "Paul Sagov", 8075: "Microsoft Corporation"})
-check("сеть на человека без подсказок: «Частный провайдер», имя не раскрыто", V.provider_name(204161, "Alexey Geiner") == "Частный провайдер AS204161")
-check("организация человека публично не показывается", V.public_org(204161, "Alexey Geiner") is None and V.public_org(219095, "Paul Sagov") is None)
-check("название из names.json приоритетнее (бренд, владелец физлицо)", V.provider_name(219095, "Paul Sagov") == "Astra VPS")
+V._org_cache.update(t=time.time(), data={204161: "Ivan Smirnov", 219095: "Oleg Volkov", 8075: "Microsoft Corporation"})
+check("сеть на человека без подсказок: «Частный провайдер», имя не раскрыто", V.provider_name(204161, "Ivan Smirnov") == "Частный провайдер AS204161")
+check("организация человека публично не показывается", V.public_org(204161, "Ivan Smirnov") is None and V.public_org(219095, "Oleg Volkov") is None)
+check("название из names.json приоритетнее (бренд, владелец физлицо)", V.provider_name(219095, "Oleg Volkov") == "Astra VPS")
+json.dump({"196949": "Частный провайдер AS196949", "219095": "Astra VPS", "44941": "Астраханское цифровое телевидение", "777201": "Ростелеком Юг"},
+          open(os.path.join(tmp, "names.json"), "w", encoding="utf-8"), ensure_ascii=False)
+V._names["mtime"] = 0
+V._asn_cache.update({44941: "Megafon Rostelekom Ast. TTK", 777201: ""})
+check("имя из names.json не перебивается брендом из описания сети (вышестоящие операторы)",
+      V.provider_group(44941, "ZAO Astrakhan Digital Television") == ("n:астраханское цифровое телевидение", "Астраханское цифровое телевидение"),
+      V.provider_group(44941, "ZAO Astrakhan Digital Television"))
+check("имя из names.json с названием бренда попадает в бренд", V.provider_group(777201, "Some LLC")[1] == "Ростелеком", V.provider_group(777201, "Some LLC"))
 check("обычная организация показывается", V.public_org(8075, "Microsoft Corporation") == "Microsoft Corporation")
 check("в разборе: сокращения (OBIT, НИИСИ РАН) не тревожат", not V._name_flags("OBIT") and not V._name_flags("НИИСИ РАН"))
 check("в разборе: русское название без английского помечается, со словарным нет", any("английского" in x for x in V._name_flags("Новый Оператор")) and not any("английского" in x for x in V._name_flags("Ростелеком")))
@@ -111,7 +121,7 @@ check("в разборе: «(^ ^)» и «==Vodocomfort==» помечаются"
 check("в разборе: скобка в конце названия не «странные символы»", not any("странные" in f for n in ("Дом.ру (ЭР-Телеком)", "Selectel (Москва)", "Т2 (Tele2)", "Образовательный центр (AS25100)") for f in V._name_flags(n)))
 check("в разборе: непарные и лишние скобки помечаются", all(any("странные" in f for f in V._name_flags(n)) for n in ("Имя (", "Имя)", ")Имя", "(Имя")))
 check("в разборе: имя человека в организации помечается", any("человека" in f for f in V._name_flags("Astra VPS", 204161)))
-check("в базу вместо имени человека кладётся «Частное лицо»", V._store_org("Alexey Geiner") == "Частное лицо" and V._store_org("Microsoft Corporation") == "Microsoft Corporation" and V._store_org(None) is None)
+check("в базу вместо имени человека кладётся «Частное лицо»", V._store_org("Ivan Smirnov") == "Частное лицо" and V._store_org("Microsoft Corporation") == "Microsoft Corporation" and V._store_org(None) is None)
 check("«Частное лицо» дальше распознаётся как частное лицо", V.provider_name(204161, "Частное лицо") == "Частный провайдер AS204161")
 import threading
 n0 = threading.active_count()

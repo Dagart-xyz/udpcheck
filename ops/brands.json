@@ -60,7 +60,7 @@
   "name": "ТТК",
   "match": [
    "ttk-svy",
-   "transtelecom",
+   "\\btranstelecom",
    "\\bttk\\b"
   ]
  },

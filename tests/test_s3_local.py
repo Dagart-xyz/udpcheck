@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "..", "ops", "udpcheck-s3")
@@ -38,6 +39,8 @@ check("подпись совпадает с эталоном документа�
 print("[работа с S3-сервером]")
 STORE = {}
 SEEN = []
+PUT_PLAN = []          # что сервер делает с очередными PUT: "stall" (молчит дольше таймаута клиента) или код ошибки; пусто: обычный ответ
+PUTS = []              # ключи всех пришедших PUT, по порядку
 
 
 class H(BaseHTTPRequestHandler):
@@ -51,6 +54,16 @@ class H(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         key, _q = self._key()
+        PUTS.append(key)
+        act = PUT_PLAN.pop(0) if PUT_PLAN else None
+        if act == "stall":
+            time.sleep(2.5)            # клиент с таймаутом 1 с не дождётся ответа, как при зависшей загрузке 29.10
+            return
+        if act:
+            self.send_response(act)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         n = int(self.headers.get("Content-Length", "0"))
         STORE[key] = self.rfile.read(n)
         SEEN.append(self.headers.get("Authorization", ""))
@@ -83,9 +96,9 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-srv = HTTPServer(("127.0.0.1", 0), H)
+srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-env = dict(os.environ, S3_ENDPOINT="127.0.0.1:%d" % srv.server_port, S3_REGION="ru-3", S3_BUCKET="bk", S3_ACCESS_KEY="AK", S3_SECRET_KEY="SK",
+env = dict(os.environ, S3_ENDPOINT="127.0.0.1:%d" % srv.server_port, S3_REGION="test-1", S3_BUCKET="bk", S3_ACCESS_KEY="AK", S3_SECRET_KEY="SK",
            S3_SCHEME="http", S3_PATHSTYLE="1", PYTHONUTF8="1")
 
 
@@ -99,7 +112,7 @@ open(src, "wb").write(os.urandom(5000))
 for i in range(5):
     r = run("put", src, "hub/hub-2026100%d-0300.tar.gz.enc" % i)
 check("загрузка работает", r.returncode == 0 and len(STORE) == 5, r.stderr)
-check("запрос подписан (заголовок Authorization с AWS4-HMAC-SHA256)", SEEN and SEEN[0].startswith("AWS4-HMAC-SHA256 Credential=AK/") and "/ru-3/s3/aws4_request" in SEEN[0], SEEN[:1])
+check("запрос подписан (заголовок Authorization с AWS4-HMAC-SHA256)", SEEN and SEEN[0].startswith("AWS4-HMAC-SHA256 Credential=AK/") and "/test-1/s3/aws4_request" in SEEN[0], SEEN[:1])
 r = run("list", "hub/")
 check("список показывает 5 объектов", len(r.stdout.strip().splitlines()) == 5, r.stdout)
 out = os.path.join(tmp, "b.bin")
@@ -111,6 +124,34 @@ r = run("delete", "hub/hub-20261002-0300.tar.gz.enc")
 check("удаление работает", r.returncode == 0 and len(STORE) == 2, r.stderr)
 r = run("get", "hub/нет-такого", out)
 check("ошибка скачивания даёт ненулевой код", r.returncode != 0)
+
+print("[повтор загрузки]")
+
+
+def put_with(plan, key, **extra):
+    PUT_PLAN[:] = plan
+    PUTS.clear()
+    STORE.pop(key, None)
+    e = dict(env, **dict({"S3_PUT_TIMEOUT": "1", "S3_PUT_PAUSE": "0"}, **extra))
+    r = subprocess.run([sys.executable, SCRIPT, "put", src, key], env=e, capture_output=True, text=True, encoding="utf-8", timeout=60)
+    return r, PUTS.count(key)
+
+
+r, n = put_with(["stall"], "hub/t1")
+check("без S3_PUT_TRIES одна попытка, как раньше: зависание даёт ошибку", r.returncode != 0 and n == 1 and "hub/t1" not in STORE, (r.returncode, n, r.stderr[-300:]))
+check("ошибка зависания понятная, без трассировки Python", "Traceback" not in r.stderr and "не удалась" in r.stderr, r.stderr[-300:])
+r, n = put_with(["stall", "stall"], "hub/t2", S3_PUT_TRIES="3")
+check("после двух зависаний третья попытка загружает", r.returncode == 0 and n == 3 and STORE.get("hub/t2") == open(src, "rb").read(), (r.returncode, n, r.stderr[-300:]))
+check("о неудачных попытках сказано в выводе", r.stderr.count("повтор") == 2, r.stderr[-400:])
+r, n = put_with(["stall", "stall", "stall"], "hub/t3", S3_PUT_TRIES="3")
+check("три зависания из трёх: ошибка, лишних попыток нет", r.returncode != 0 and n == 3 and "hub/t3" not in STORE, (r.returncode, n))
+r, n = put_with([503], "hub/t4", S3_PUT_TRIES="3")
+check("ответ 5xx повторяется", r.returncode == 0 and n == 2, (r.returncode, n, r.stderr[-300:]))
+r, n = put_with([403], "hub/t5", S3_PUT_TRIES="3")
+check("ответ 403 (доступ) не повторяется", r.returncode != 0 and n == 1, (r.returncode, n))
+t = time.time()
+r, n = put_with(["stall"], "hub/t6", S3_PUT_TRIES="2", S3_PUT_PAUSE="1")
+check("между попытками пауза S3_PUT_PAUSE", r.returncode == 0 and n == 2 and time.time() - t >= 2, (r.returncode, n, time.time() - t))
 srv.shutdown()
 
 print()

@@ -106,15 +106,44 @@ def send_ntfy(text):
         return False
 
 
-def deliver(text):
-    """True, если сообщение ушло хотя бы одним каналом (или каналов нет вовсе: тогда просто печатаем)."""
-    if not (TG_TOKEN and TG_CHAT) and not NTFY_TOPIC:
-        print("ОПОВЕЩЕНИЕ:", text)
-        return True
+# ntfy.sh превращает тело больше 4096 байт в файл attachment.txt (пересылка в Telegram отдаёт от него только «You received a file»),
+# у Telegram предел 4096 символов. Кириллица — 2 байта на букву, поэтому режем по байтам UTF-8, с запасом.
+MSG_BYTES = 3900
+
+
+def split_message(text, limit=MSG_BYTES):
+    """Части не больше limit байт UTF-8, по границам строк; строку длиннее limit режем по символам."""
+    parts, cur = [], ""
+    for ln in str(text).split(chr(10)):
+        while len(ln.encode("utf-8")) > limit:
+            n = len(ln.encode("utf-8")[:limit].decode("utf-8", "ignore"))
+            if cur:
+                parts.append(cur)
+            parts.append(ln[:n])
+            cur, ln = "", ln[n:]
+        cand = (cur + chr(10) + ln) if cur else ln
+        if cur and len(cand.encode("utf-8")) > limit:
+            parts.append(cur)
+            cand = ln
+        cur = cand
+    parts.append(cur)
+    return [p for p in parts if p.strip()] or [str(text)]
+
+
+def deliver_one(text):
     ok = send_tg(text)
     if ok:
         return True
     return bool(send_ntfy(text))          # Telegram не ответил или не настроен: запасной канал
+
+
+def deliver(text):
+    """True, если все части сообщения ушли хотя бы одним каналом (или каналов нет вовсе: тогда просто печатаем).
+    При неудаче вызывающий повторит сообщение целиком: уже ушедшие части придут ещё раз, зато ничего не потеряется."""
+    if not (TG_TOKEN and TG_CHAT) and not NTFY_TOPIC:
+        print("ОПОВЕЩЕНИЕ:", text)
+        return True
+    return all([deliver_one(p) for p in split_message(text)])
 
 
 def notify(st, text, critical=False):
@@ -323,14 +352,7 @@ def names_digest(st):
         why = (" — " + "; ".join(i["flags"])) if i.get("flags") else ""
         lines.append("%sAS%d «%s»%s [%s]%s" % (mark, i["asn"], i["name"], org, "хостинг" if i.get("kind") == "hosting" else "провайдер", why))
     tail = "Поправить: names.json (имя по номеру AS) или brands.json (оператор из нескольких сетей). Скажите Claude, что исправить."
-    chunks, cur = [], head
-    for ln in lines:
-        if len(cur) + len(ln) + 1 > 3500:
-            chunks.append(cur)
-            cur = ""
-        cur += (chr(10) if cur else "") + ln
-    chunks.append(cur + chr(10) + tail)
-    if all([deliver(c) for c in chunks]):
+    if deliver(chr(10).join([head] + lines + [tail])):          # на части по размеру режет deliver
         try:
             body = json.dumps({"asns": [i["asn"] for i in items]}).encode()
             req = urllib.request.Request(HUB + "/api/v2/names/review", data=body, method="POST",

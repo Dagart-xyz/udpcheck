@@ -53,13 +53,15 @@ msrv = http.server.ThreadingHTTPServer(("127.0.0.1", 18199), M)
 threading.Thread(target=msrv.serve_forever, daemon=True).start()
 
 tmp = tempfile.mkdtemp(prefix="udpc_site_")
+run_dir = os.path.join(tmp, "run")          # как RuntimeDirectory= у службы: /run/udpcheck в памяти, переживает перезапуск службы
+os.makedirs(run_dir)
 tfile = os.path.join(tmp, "targets.json")
 json.dump([{"code": "RU-T", "name": "ru test", "country": "XX", "ip": "127.0.0.1", "ports": [19993, 19777, 19321], "secret": "a" * 32, "tcp_port": 18443}], open(tfile, "w"))
 HUB = "http://127.0.0.1:18180/udpcheck"
 BEAT = "b" * 32
 env = dict(os.environ, UDPCHECK_RKN_LIST="", UDPCHECK_TRUSTED_PROXIES="", UDPCHECK_GEO_DIR=os.path.join(tmp, "nogeo"), UDPCHECK_ALLOW_NON_GLOBAL="1", UDPCHECK_DEFAULT_COUNTRY="XX",
            UDPCHECK_HTTP_PORT="18180", UDPCHECK_UDP_BIND="127.0.0.1", UDPCHECK_UDP_PORTS="19993,19777,19321", UDPCHECK_HUB_DB=os.path.join(tmp, "hub.db"),
-           UDPCHECK_HUB_TARGETS=tfile, UDPCHECK_BEAT_SECRET=BEAT, UDPCHECK_CADDY_METRICS="http://127.0.0.1:18199/metrics", UDPCHECK_CADDY_SAMPLE_S="1")
+           UDPCHECK_HUB_TARGETS=tfile, UDPCHECK_BEAT_SECRET=BEAT, UDPCHECK_CADDY_METRICS="http://127.0.0.1:18199/metrics", UDPCHECK_CADDY_SAMPLE_S="1", RUNTIME_DIRECTORY=run_dir)
 
 
 def start():
@@ -106,7 +108,7 @@ for path, want in (("/udpcheck/api/v2/providers/12345?x=1", "providers/*"), ("/a
                    ("/etc/passwd", "other"), ("/api/v2/%3Cscript%3E", "other"), ("/api/v2/", "other")):
     check("имя запроса для 429: %s -> %s" % (path, want), V._rl_group(path) == want, V._rl_group(path))
 
-C1, C2 = "1" * 32, "2" * 32
+C1, C2, C3 = "1" * 32, "2" * 32, "3" * 32
 proc = start()
 try:
     check("хаб поднялся", up())
@@ -156,10 +158,27 @@ try:
     check("хаб перезапущен", up())
     time.sleep(1)
     req("/api/v2/providers", headers={"X-Client": C1})
+    req("/api/v2/providers", headers={"X-Client": C3})
     st, j = stats()
     row = today_row(j)
-    check("после перезапуска хаба загрузки сохранены и растут (5)", row.get("views") == 5, row)
-    check("после перезапуска число браузеров за сутки не уменьшилось (2)", row.get("browsers") == 2, row)
+    check("после перезапуска хаба загрузки сохранены и растут (6)", row.get("views") == 6, row)
+    check("после перезапуска набор браузеров продолжается: прежние 2 + новый 1, повторный не считается (3)", row.get("browsers") == 3, row)
+    saved = open(os.path.join(run_dir, "site-browsers.bin"), "rb").read()
+    check("в /run только дата и хэши: самих номеров браузеров там нет", saved[:10].decode() == j["today"] and (len(saved) - 10) == 3 * 8
+          and all(c.encode() not in saved for c in (C1, C2, C3)), saved[:40])
+
+    # набор за другие сутки или испорченный файл не подхватывается
+    V.SITE_UNIQ.update(day="", set=set())
+    os.environ["RUNTIME_DIRECTORY"] = run_dir
+    for bad in (b"2000-01-01" + b"A" * 8, saved[:10] + b"xyz", b""):
+        open(os.path.join(run_dir, "site-browsers.bin"), "wb").write(bad)
+        V.SITE_STATE["uniq_loaded"] = False
+        V._uniq_boot()
+        check("не подхватывается: %r" % bad[:14], len(V.SITE_UNIQ["set"]) == 0, V.SITE_UNIQ)
+    os.environ.pop("RUNTIME_DIRECTORY")
+    V.SITE_STATE["uniq_loaded"] = False
+    V._uniq_boot()
+    check("без RUNTIME_DIRECTORY (ручной запуск, тесты) ничего не читается и не падает", len(V.SITE_UNIQ["set"]) == 0)
 
     # в базе только числа: нет ни номеров браузеров, ни их хэшей, ни адресов
     db = sqlite3.connect(os.path.join(tmp, "hub.db"), timeout=10)

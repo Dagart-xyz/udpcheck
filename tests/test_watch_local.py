@@ -170,5 +170,29 @@ finally:
     if proc.poll() is None:
         proc.kill()
 
+print("[длинные сообщения режутся по байтам]")
+import importlib.util
+spec = importlib.util.spec_from_file_location("udpcheck_watch", os.path.join(ROOT, "ops", "udpcheck-watch.py"))
+W = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(W)
+long_ru = chr(10).join("• AS%d «Частный провайдер AS%d» — Общество с ограниченной ответственностью [провайдер]" % (200000 + i, 200000 + i) for i in range(200))
+parts = W.split_message(long_ru)
+check("разбор на 200 сетей: каждая часть не больше 3900 байт (ntfy делает из 4096+ байт файл)", len(parts) > 1 and all(len(p.encode("utf-8")) <= W.MSG_BYTES for p in parts),
+      [len(p.encode("utf-8")) for p in parts])
+check("строки не теряются и не рвутся", chr(10).join(parts) == long_ru)
+huge = "Я" * 5000
+parts = W.split_message("начало" + chr(10) + huge)
+check("строка длиннее предела режется по символам, без битых букв", all(len(p.encode("utf-8")) <= W.MSG_BYTES for p in parts) and "".join(parts[1:]) == huge and parts[0] == "начало",
+      [len(p.encode("utf-8")) for p in parts])
+check("короткое сообщение — одной частью", W.split_message("ПРОБЛЕМА: хаб молчит") == ["ПРОБЛЕМА: хаб молчит"])
+sent = []
+W.NTFY_TOPIC, W.TG_TOKEN = "test-topic", ""
+W.send_tg = lambda t: None
+W.send_ntfy = lambda t: sent.append(t) or True
+check("deliver шлёт длинное сообщение частями", W.deliver(long_ru) and len(sent) > 1 and chr(10).join(sent) == long_ru, len(sent))
+sent.clear()
+W.send_ntfy = lambda t: sent.append(t) or len(sent) != 2          # вторая часть не уходит
+check("если часть не ушла, deliver сообщает о неудаче (сообщение повторится)", W.deliver(long_ru) is False)
+
 print("\nИТОГ:", "всё прошло" if fails == 0 else "ПРОВАЛОВ: %d" % fails)
 sys.exit(1 if fails else 0)
