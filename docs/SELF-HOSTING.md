@@ -109,7 +109,10 @@ UDPCHECK_TARGET_TCP_PORT=8443
   само это имя, без организации и описания сети), `brands.json`: операторы из
   нескольких сетей (`[{"name": "Оператор", "match": ["регулярное выражение"]}]`, образец в `ops/brands.json`), `provider_kinds.json`:
   `{"12345": "hosting"}` для ручной пометки хостингов, `overrides.json`: исправления базы GeoIP (`[{"cidr": "...", "asn": ..., "org": "..."}]`).
-- **Логотипы:** `python add_logo.py --asn 12345 --domain provider.example` (файл ляжет в `/var/www/udpcheck-site/logos/`).
+- **Логотипы:** `python add_logo.py --all` скачивает значки с официальных сайтов сетей из списка провайдеров (сайт сети берётся из PeeringDB или
+  из `logos/domains.json`), `--asn 12345 --domain provider.example` — одна сеть, `--reject 12345` — убрать неудачный. Файлы ложатся в `logos/`
+  рядом со скриптом, проверить их глазами можно на странице `logos/review.html`, на сайт их выкладывает `ops/deploy_site.sh`. Скачивание идёт
+  с вашего компьютера заранее: ни хаб, ни страница посетителя к сайтам провайдеров не обращаются.
 - **Города по-русски:** `ops/build_cities_ru.py` (GeoNames).
 - **Резервные копии:** `ops/udpcheck-backup` с `udpcheck-backup.service` и `.timer` (раз в сутки). Куда класть копии, задаёт `/etc/udpcheck/backup.env`: по SSH на свой
   сервер (`BACKUP_DEST`, `BACKUP_KEY`) и/или в S3 (`S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_KEEP`, по умолчанию 14 копий;

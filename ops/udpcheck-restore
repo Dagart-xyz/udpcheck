@@ -10,7 +10,7 @@
 #                  udpcheck-restore --local-certs  (без S3: разложить для режима ожидания сертификаты из собственного хранилища Caddy;
 #                                                   так бывший хаб, который сам никогда не восстанавливался, может перейти в режим ожидания)
 # Что делает: останавливает udpcheck, раскладывает базу, /etc/udpcheck (кроме backup.env/backup.pass; target.env и role.env, если на сервере уже
-# есть свои, остаются свои), словари названий и справочник городов, сайт, сертификаты Caddy, Caddyfile (в /etc/caddy/Caddyfile.restored:
+# есть свои, остаются свои), словари названий и справочник городов, сайт (только на чистом сервере), сертификаты Caddy, Caddyfile (в /etc/caddy/Caddyfile.restored:
 # включать его стоит после переключения DNS), udpcheck.service с дополнениями; запускает udpcheck.
 # Прежние файлы на месте назначения сохраняются с суффиксом .pre-restore. Базы DB-IP в копии нет: после восстановления запустите udpcheck-geo-update.
 [ -r /etc/udpcheck/backup.env ] && { set -a; . /etc/udpcheck/backup.env; set +a; }
@@ -93,11 +93,17 @@ for f in overrides names names_en brands provider_kinds; do
   [ -f "$W/files/$f.json" ] && { keep "/opt/udpcheck/geo/$f.json"; cp -a "$W/files/$f.json" /opt/udpcheck/geo/; }
 done
 [ -f "$W/files/cities_ru.sqlite" ] && cp -a "$W/files/cities_ru.sqlite" /opt/udpcheck/geo/
-# сайт
-[ -d /var/www/udpcheck-site ] && [ ! -e /var/www/udpcheck-site.pre-restore ] && mv /var/www/udpcheck-site /var/www/udpcheck-site.pre-restore
-rm -rf /var/www/udpcheck-site
-install -d -m 755 /var/www
-cp -a "$W/files/site" /var/www/udpcheck-site
+# сайт: его выкладывает ops/deploy_site.sh сразу на всех кандидатов в хабы (вместе с логотипами), поэтому из копии берём только
+# на чистом сервере. Иначе переключение вернуло бы прошлую версию (копия бывает на час старше выкладки) или перенесло бы
+# с прежнего хаба файлы, которых нет в выложенной сборке.
+if [ -f /var/www/udpcheck-site/index.html ]; then
+  echo "сайт на этом сервере уже выложен: из копии не берём"
+else
+  [ -d /var/www/udpcheck-site ] && [ ! -e /var/www/udpcheck-site.pre-restore ] && mv /var/www/udpcheck-site /var/www/udpcheck-site.pre-restore
+  rm -rf /var/www/udpcheck-site
+  install -d -m 755 /var/www
+  cp -a "$W/files/site" /var/www/udpcheck-site
+fi
 # сертификаты Caddy из копии: выданы на домен, поэтому годятся на любом сервере, который им отвечает
 if [ -d "$W/files/caddy-data" ] && id caddy >/dev/null 2>&1; then
   install -d -m 700 -o caddy -g caddy /var/lib/caddy/.local/share
