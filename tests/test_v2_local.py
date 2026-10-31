@@ -397,6 +397,14 @@ try:
     check("после замера узла сама собралась трассировка до узла", nnode >= 6, nnode)
     cols_t = [c[1] for c in dbt.execute("PRAGMA table_info(traces)")]
     check("в таблице трассировок нет адресов", not any(c in ("ip", "addr", "address") for c in cols_t), cols_t)
+    codes = [api("POST", "/api/v2/web/trace")[0] for _ in range(12)]
+    st, w2 = api("POST", "/api/v2/web/trace", headers={"X-Client": "d" * 32})
+    check("web/trace: 12 повторных нажатий одного браузера -> 429 и не выбирают потолок IP, другой браузер с того же адреса запускает трассировку",
+          codes == [429] * 12 and st == 202, (codes, st, w2))
+    for _ in range(80):                          # дождаться конца, чтобы трассировка не шла фоном во время следующих проверок
+        if st != 202 or api("GET", "/api/v2/web/trace/" + w2["id"], headers={"X-Client": "d" * 32})[1].get("done"):
+            break
+        time.sleep(0.5)
     st, pp = api("GET", "/api/v2/stats/paths?hours=24")
     check("stats/paths отвечает", st == 200 and "providers" in pp, pp)
     body = json.dumps({"ts": int(time.time())}).encode()

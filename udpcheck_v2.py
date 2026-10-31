@@ -2812,9 +2812,7 @@ def target_stun_result(h, body):
 
 def web_stunseen_start(h, ip):
     """Браузер просит серверы сказать, сколько его STUN-запросов они получили (адрес посетителя получают только наши серверы)."""
-    ok, retry = rl_seen_ip.allow(ip)
-    if ok:
-        ok, retry = rl_seen.allow("%s|%s" % (_cid(h) or "-", ip))
+    ok, retry = _allow_client(rl_seen, "%s|%s" % (_cid(h) or "-", ip), rl_seen_ip, ip)
     if not ok:
         return h.err(429, "слишком часто", retry)
     if not TARGETS:
@@ -2954,6 +2952,16 @@ def web_stun(h, ip):
     return h.send_json(200, {"country": vc, "targets": targets, "attempts": 3})
 
 
+def _allow_client(per_client, client_key, per_ip, ip_key):
+    """Лимит браузера, затем потолок на IP. Отказ по лимиту браузера не тратит потолок адреса: иначе один посетитель, жмущий
+    «Проверить» подряд, выбирает лимит у всех за тем же адресом оператора. over() ничего не записывает; allow() при исчерпанном
+    лимите тоже ничего не записывает и только возвращает, сколько ждать."""
+    if per_client.over(client_key):
+        return per_client.allow(client_key)
+    ok, retry = per_ip.allow(ip_key)
+    return per_client.allow(client_key) if ok else (False, retry)
+
+
 def _cid(h):
     """Случайный номер браузера (страница создаёт его сама и хранит у себя): не отпечаток и не связан с личностью.
     В базе храним только его хэш."""
@@ -2966,9 +2974,7 @@ def web_report(h, ip, body):
     В статистику идёт только проверка, которую посетитель прошёл через наши серверы (они подтвердили приём его запросов), и если
     число ответов не противоречит тому, что серверы видели."""
     cid = _cid(h)
-    ok, retry = rl_webrep_ip.allow(ip or "local")
-    if ok:
-        ok, retry = rl_webrep.allow("%s|%s" % (cid or "-", ip or "local"))
+    ok, retry = _allow_client(rl_webrep, "%s|%s" % (cid or "-", ip or "local"), rl_webrep_ip, ip or "local")
     if not ok:
         return h.err(429, "результат этого часа уже передан в статистику", retry)
     try:
@@ -3033,9 +3039,7 @@ def web_trace_start(h, ip):
     if not (S.is_public(ip) or S.ALLOW_NON_GLOBAL):
         return h.err(400, "трассировка возможна только до публичного адреса")
     cid = _cid(h)
-    ok, retry = rl_wtrace_ip.allow(ip)
-    if ok:
-        ok, retry = rl_wtrace.allow(("c:" + cid) if cid else ("i:" + ip))
+    ok, retry = _allow_client(rl_wtrace, ("c:" + cid) if cid else ("i:" + ip), rl_wtrace_ip, ip)
     if not ok:
         return h.err(429, "трассировку можно запускать раз в 5 минут", retry)
     if not rl_trace_all.allow("all")[0]:
