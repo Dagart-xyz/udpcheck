@@ -56,7 +56,10 @@
    в `udpcheck_node.py` (`DEFAULT_HUB`), `installer/install-node.sh.in` (`HUB=`), тексте `site/index.html`, `site/.well-known/security.txt`,
    и перед выкладкой замените `__BUILD__` в `index.html` меткой версии (`ops/deploy_site.sh` делает это сам).
 6. Веб-сервер: образец `Caddyfile.dagart` (замените домен). Хаб слушает только `127.0.0.1:18080`, наружу его выставляет Caddy.
-   Важно оставить в Caddy `log { output discard }`: адреса посетителей в журналах быть не должно.
+   Важно оставить в Caddy `log { output discard }` в блоках сайтов и глобальный `log default` с `exclude http.log.access` и фильтром,
+   который удаляет `request>remote_ip`, `remote_port`, `client_ip` и `headers`: адреса посетителей в журналах быть не должно.
+   Одного `output discard` мало: он выключает только журнал доступа своего сайта, а ошибки запросов (посетитель закрыл страницу, хаб
+   перезапускается) и запросы по голому IP или с чужим Host Caddy пишет в системный журнал с адресом и всеми заголовками.
 7. Запуск: `systemctl daemon-reload && systemctl enable --now udpcheck`. Проверка: `curl https://ваш-домен/api/v2/health`.
    Хаб сам ходит наружу: раз в 10 минут шлёт UDP-пробы опорным серверам (проверка, что они отвечают) и раз в сутки скачивает список адресов
    из реестра блокировок (`UDPCHECK_RKN_LIST`, по умолчанию сводка antifilter.download; пусто выключает сверку). Подробности: [PROTOCOL.md](../PROTOCOL.md).
@@ -129,6 +132,7 @@ UDPCHECK_TARGET_TCP_PORT=8443
 - `ops/hardening/udpcheck-guard.nft` (хаб) и `udpcheck-guard-anchor.nft` (опорный сервер без веб-сервера): ограничение частоты новых соединений и пакетов с одного адреса в ядре (nftables), состояние только в памяти. Новые версии nft показывают счётчики как динамические множества (`set ssh4 {...}`): смотрите `nft list table inet udpcheck_guard`;
 - `ops/hardening/99-udpcheck-hardening.conf` (sysctl) и в `Caddyfile.dagart` таймауты, ограничение размера заголовков и тела запроса, сжатие ответов, HSTS, `Permissions-Policy` и строгий CSP;
 - `ops/hardening/journald-udpcheck.conf` в `/etc/systemd/journald.conf.d/`: системный журнал не дольше 30 суток (в нём попытки входа по SSH; это единственное место, где остаются адреса, и политика данных об этом говорит);
+- на Ubuntu `rsyslog` копирует системный журнал в `/var/log/syslog`, `auth.log` и `kern.log` и хранит 4 недельные ротации, то есть около 5 недель, дольше обещанных 30 суток. Нашим службам и `fail2ban` (`backend = systemd`) он не нужен: `journald-udpcheck.conf` с `ForwardToSyslog=no` и `systemctl restart systemd-journald`, затем `systemctl mask --now rsyslog.service` и `systemctl stop syslog.socket`, затем удалите `/var/log/syslog*`, `/var/log/auth.log*` и `/var/log/kern.log*`, те же записи остаются в журнале systemd. Вернуть: убрать `ForwardToSyslog=no`, `systemctl restart systemd-journald`, `systemctl unmask rsyslog.service && systemctl enable --now rsyslog.service`. На Debian 13 `rsyslog` по умолчанию не установлен;
 - `ops/hardening/sshd-udpcheck.conf` в `/etc/ssh/sshd_config.d/10-udpcheck.conf`: только ключи, без проброса портов, X11 и агента, `LoginGraceTime 30`, `MaxAuthTries 4` (проверьте `sshd -t` и откройте второе подключение, прежде чем закрыть первое);
 - автообновления безопасности: `unattended-upgrades` и `ops/hardening/20auto-upgrades`. На некоторых образах хостеров `apt-daily*.service` замаскированы (`systemctl unmask apt-daily.service apt-daily-upgrade.service`). Ядро и libc применяются только после перезагрузки: смотрите `/var/run/reboot-required` и перезагружайте серверы по одному, проверяя после каждого `nft list tables`, службы и ответ портов снаружи;
 - `ops/hardening/caddy-sandbox.conf` в `/etc/systemd/system/caddy.service.d/sandbox.conf`: Caddy может писать только в `/var/lib/caddy` и `/var/log/caddy` (оценка `systemd-analyze security` 8.8 → 1.6);

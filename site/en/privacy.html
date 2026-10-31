@@ -33,7 +33,7 @@ li{margin:4px 0}
 <main>
 <div class="top"><a href="/en/">← UDPcheck</a><span class="lang"><a href="/privacy" hreflang="ru" lang="ru" title="Русская версия">RU</a></span></div>
 <h1>Privacy policy</h1>
-<div class="muted">Revision of 10 October 2026. Site dagart.xyz, source code: <a href="https://github.com/Dagart-xyz/udpcheck">github.com/Dagart-xyz/udpcheck</a> (AGPL-3.0).</div>
+<div class="muted">Revision of 31 October 2026. Site dagart.xyz, source code: <a href="https://github.com/Dagart-xyz/udpcheck">github.com/Dagart-xyz/udpcheck</a> (AGPL-3.0).</div>
 
 <h2>1. Who we are</h2>
 <div class="card"><p>The service operator is the owner of the UDPcheck project (“we”). Contact for any questions about data:
@@ -58,7 +58,7 @@ cannot build a route to you. We collect nothing beyond what is needed for that.<
 <td>numbers per day only: how many times the page was loaded, how many different browsers, how many times “Check” was pressed, how many requests the server rejected or could not serve. Different browsers are counted by a hash of “date + random number”: the hash itself is never written to disk, only the number remains. Addresses, headers and pages are not recorded. Kept for up to a year</td></tr>
 <tr><td><b>Intermediate route hops</b></td><td>to show you the route and the places where it breaks</td><td>hop addresses only in memory and in your page; the database gets only the numbers of the networks along the path</td></tr>
 <tr><td><b>Data in your browser</b></td><td>to show the last route without asking again</td><td>localStorage (<code>udpc_trace</code>, up to 6 hours), a mark that the notice was closed (<code>udpc_notice</code>) and the chosen language (<code>udpc_lang</code>); cleared together with the site data</td></tr>
-<tr><td><b>Nodes and volunteer servers</b> (if you install them)</td><td>operation of the check network</td><td>callsign, network, country, approximate city, type of system, key hash; for a volunteer server also its IP (not shown publicly) while it takes part</td></tr>
+<tr><td><b>Nodes and volunteer servers</b> (if you install them)</td><td>operation of the check network</td><td>callsign, network, country, approximate city, type of system, key hash; for a volunteer server also its IP (not shown publicly) while it keeps in touch: after 30 days of silence it is deleted</td></tr>
 </table>
 <p class="muted">Database backups are encrypted and kept for up to 14 days; they hold the same set as the database itself: visitors' IPs are not there, volunteer servers' IPs are.</p>
 <p class="muted">There are two exceptions to “IP is not written to logs”. First: the servers' system log records the addresses from which someone tries to guess a login over SSH (this is administrator login, not the site). Second: if a request to the site clearly looks like an attack (probing for service files such as <code>.env</code>, typical WordPress and phpMyAdmin addresses, SQL injection), the sender's address and the request itself are written to the log. Ordinary visitors never request such addresses. Whoever does it three times within ten minutes is blocked for a day or longer. These records are kept for up to 30 days and are used only to block bots and scanners automatically. Addresses of other site visitors and of checks do not get there; rate counters live in memory and disappear on restart.</p>

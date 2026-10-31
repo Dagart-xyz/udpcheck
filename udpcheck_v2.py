@@ -44,6 +44,7 @@ DEV_COUNTRIES = [tuple(x.split("=", 1)) for x in os.environ.get("UDPCHECK_DEV_CO
 REF_MIN_AGE = int(os.environ.get("UDPCHECK_REF_MIN_AGE", "86400"))          # чужие опорные серверы выдаём только узлам, работающим не меньше суток
 REF_MIN_ROUNDS = int(os.environ.get("UDPCHECK_REF_MIN_ROUNDS", "3"))       # ...и сделавшим хотя бы столько замеров
 REF_MAX_PER_DAY = int(os.environ.get("UDPCHECK_REF_MAX_PER_DAY", "5"))     # разных чужих опорных серверов на один узел в сутки
+REF_KEEP_DAYS = int(os.environ.get("UDPCHECK_REF_KEEP_DAYS", "30"))        # сервер добровольца молчит дольше: его запись с IP удаляем
 BEAT_SECRET = os.environ.get("UDPCHECK_BEAT_SECRET", "")           # секрет «сигнала жизни» от наблюдателя (оповещения)
 CADDY_METRICS = os.environ.get("UDPCHECK_CADDY_METRICS", "http://127.0.0.1:2019/metrics")      # счётчики запросов веб-сервера (Caddy, директива metrics)
 CADDY_EVERY = int(os.environ.get("UDPCHECK_CADDY_SAMPLE_S", "300"))                                   # как часто снимать счётчики Caddy
@@ -1015,18 +1016,25 @@ def janitor():
                 del TASKS[tid]
         # раз в час чистим старые сырые данные
         if int(now) // 30 % 120 == 0:
-            cutoff = int(now - RETENTION_DAYS * 86400)
-            for tbl in ("meas", "tres", "rounds", "traces", "webchecks"):
-                try:
-                    db_exec("DELETE FROM %s WHERE ts < ?" % tbl, (cutoff,))
-                except Exception:
-                    pass
-            try:
-                # узел, который неделю не выходил на связь и не сделал ни одного замера, не был сервером участника: это брошенная (или массовая) регистрация
-                db_exec("DELETE FROM nodes WHERE last_seen < ? AND id NOT IN (SELECT DISTINCT node_id FROM rounds) AND id NOT IN (SELECT node_id FROM refs)",
-                        (int(now - 7 * 86400),))
-            except Exception:
-                pass
+            purge_old(now)
+
+
+def purge_old(now):
+    """Раз в час: старые сырые данные, записи серверов добровольцев, которые давно молчат, и брошенные регистрации узлов."""
+    cutoff = int(now - RETENTION_DAYS * 86400)
+    for tbl in ("meas", "tres", "rounds", "traces", "webchecks"):
+        try:
+            db_exec("DELETE FROM %s WHERE ts < ?" % tbl, (cutoff,))
+        except Exception:
+            pass
+    try:
+        # IP сервера добровольца храним, пока он участвует: молчит дольше REF_KEEP_DAYS - запись удаляем (вернётся - зарегистрируется заново)
+        db_exec("DELETE FROM refs WHERE node_id IN (SELECT id FROM nodes WHERE last_seen < ?)", (int(now - REF_KEEP_DAYS * 86400),))
+        # узел, который неделю не выходил на связь и не сделал ни одного замера, не был сервером участника: это брошенная (или массовая) регистрация
+        db_exec("DELETE FROM nodes WHERE last_seen < ? AND id NOT IN (SELECT DISTINCT node_id FROM rounds) AND id NOT IN (SELECT node_id FROM refs)",
+                (int(now - 7 * 86400),))
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- узлы
@@ -1540,15 +1548,12 @@ def nodes_public(h, ip):
             ss = refstat.get("REF-%d" % r[1], {})
             refinfo = {"active": bool(r[2]) and is_on and _health_ok("REF-%d" % r[1]), "country": r[3], "checks": sum(ss.values()), "ok": ss.get("OK", 0)}
             refs_on += 1 if refinfo["active"] else 0
-        is_server = role in ("ref", "both")      # про серверы показываем только позывной, город и страну: хостинг не светим
+        is_server = role in ("ref", "both")      # про серверы показываем только позывной и страну: ни хостинга, ни города (сервер может стоять дома)
         entry = {"callsign": callsign, "asn": None if is_server else asn, "org": None if is_server else org,
                  "country": country, "os": osname, "online": is_on,
                     "last_seen_age": now - (last_seen or now), "since_days": max(0, (now - (created or now)) // 86400),
                     "rounds": rounds, "tunnel_rounds": tunnel, "last_verdict": last_verdict, "ref": refinfo, "role": role,
                     "ver": ver, "outdated": bool(ver and latest_agent and _vt(ver) < _vt(latest_agent))}
-        if is_server:
-            entry["city"] = city_ru(country, city)      # русское название; у домашних узлов города в списке нет
-            entry["city_en"] = city
         out.append(entry)
     anchors = []
     astat = {}                             # по проверкам посетителей за сутки: сколько раз сервер участвовал и сколько раз ответил
@@ -2879,6 +2884,25 @@ def _vol_stats():
     return d
 
 
+_VOL_SALT = secrets.token_bytes(16)     # соль выбора на время жизни процесса: по адресу нельзя заранее вычислить, кому какой сервер достанется
+
+
+def _vol_net(ip):
+    """Подсеть посетителя для выбора серверов добровольцев: /24 для IPv4, /48 для IPv6."""
+    try:
+        a = ipaddress.ip_address(ip or "")
+    except ValueError:
+        return ip or ""
+    return str(ipaddress.ip_network("%s/%d" % (a, 24 if a.version == 4 else 48), strict=False))
+
+
+def _vol_pick(ip, code, what, day=None):
+    """Число от 0 до 1, одно и то же для подсети посетителя, сервера и суток (UTC)."""
+    day = day or time.strftime("%Y-%m-%d", time.gmtime())
+    d = hmac.new(_VOL_SALT, ("%s|%s|%s|%s" % (day, _vol_net(ip), code, what)).encode(), hashlib.sha256).digest()
+    return int.from_bytes(d[:8], "big") / 2.0 ** 64
+
+
 def _community_for_browser(ip, vasn, vc):
     """До двух проверенных серверов добровольцев (на связи, не из сети посетителя, лучше у других хостеров, чем наши) попадают в проверку
     посетителя как НЕЗАВИСИМЫЕ СВИДЕТЕЛИ: они могут смягчить вывод («режется» -> «выборочно»), но обвинить провайдера сами не могут.
@@ -2892,11 +2916,13 @@ def _community_for_browser(ip, vasn, vc):
     home_project = any(t.get("country") and t["country"] == vc for t in TARGETS)
     cand = [r for r in rows if r[3] != ip and not (vasn and r[8] == vasn) and _health_ok("REF-%d" % r[0]) and _rkn_clean(r[3])]
     hs = _vol_stats()
+    # Выбор устойчивый: на сутки для одной подсети посетителя одни и те же серверы. Случайный выбор на каждый запрос позволял перебором
+    # запросов (номер браузера придумать легко) собрать адреса всех серверов добровольцев; теперь для этого нужны адреса из многих подсетей.
+    pick = lambda r, what: _vol_pick(ip, "REF-%d" % r[0], what)
     # сервер, до которого почти никто из посетителей не достаёт (например, адрес VPN в списках блокировок), не показываем, лишь изредка проверяем заново
     cand = [r for r in cand if not (hs.get("REF-%d" % r[0], [0, 0])[0] >= 6 and hs["REF-%d" % r[0]][1] < 0.1 * hs["REF-%d" % r[0]][0])
-            or random.random() < VOL_EXPLORE]
-    random.shuffle(cand)
-    cand.sort(key=lambda r: (r[8] in ours_asn))        # сначала те, кто не у наших хостеров
+            or pick(r, "explore") < VOL_EXPLORE]
+    cand.sort(key=lambda r: ((r[8] in ours_asn), pick(r, "order")))        # сначала те, кто не у наших хостеров
     out = []
     for r in cand[:2]:
         kind = _kind_rel(r[9], vc)

@@ -3,3 +3,6 @@
 # История банов хранится 30 суток: по ней считается нарастание срока для повторных нарушителей.
 [Definition]
 dbpurgeage = 30d
+# Журнал банов - в системный журнал (30 суток), а не в /var/log/fail2ban.log: его logrotate держит 4 недельные ротации, около 5 недель.
+# Оттуда же ops/udpcheck-hostcheck.py считает баны за час (journalctl -u fail2ban) для оповещения о волне банов.
+logtarget = SYSTEMD-JOURNAL

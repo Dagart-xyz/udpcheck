@@ -224,6 +224,27 @@ except ValueError:
     bad = True
 check("нет блока (hub): отказ, а не тихая порча", bad)
 
+
+def default_log(text):
+    """Глобальный блок «log default {...}» (в начале файла, до первого сниппета) одной строкой без отступов."""
+    head = text[:text.index("(hub) {")]
+    i = head.find("\tlog default {")
+    if i < 0:
+        return ""
+    depth, out = 0, []
+    for line in head[i:].splitlines():
+        depth += line.count("{") - line.count("}")
+        out.append(line.strip())
+        if depth == 0:
+            break
+    return " ".join(out)
+
+
+want = ["exclude http.log.access", "request>remote_ip delete", "request>remote_port delete", "request>client_ip delete", "request>headers delete"]
+for name, txt in (("хаба", hubtxt), ("ожидания", sb)):
+    dl = default_log(txt)
+    check("журнал Caddy %s: без журнала доступа, у ошибок вырезаны адрес и заголовки" % name, all(w in dl for w in want), dl)
+
 print("ступенчатое хранение копий")
 keys = ["hub/hub-202610%02d-%02d17.tar.gz.enc" % (d, h) for d in range(1, 26) for h in range(24)] + ["hub/hub-20261003-0330.tar.gz.enc", "hub/readme.txt"]
 gone = S.tiered_gone(keys, 48, 14)

@@ -238,5 +238,37 @@ check("вторая подряд: тревога «дело в самом хаб
 W.probe_check(st, {})
 check("пустой ответ хаба (старая версия) не ломает наблюдателя", True)
 
+print("E. серверы добровольцев для браузера: устойчивый выбор")
+check("подсеть посетителя: /24 для IPv4, /48 для IPv6", V._vol_net("10.9.9.9") == "10.9.9.0/24" and V._vol_net("2001:db8:1:2::5") == "2001:db8:1::/48",
+      (V._vol_net("10.9.9.9"), V._vol_net("2001:db8:1:2::5")))
+check("одно число для адресов из одной /24 в те же сутки, другое в другие сутки и в другой подсети",
+      V._vol_pick("10.9.9.9", "REF-1", "order", "2026-10-31") == V._vol_pick("10.9.9.200", "REF-1", "order", "2026-10-31")
+      and V._vol_pick("10.9.9.9", "REF-1", "order", "2026-11-01") != V._vol_pick("10.9.9.9", "REF-1", "order", "2026-10-31")
+      and V._vol_pick("10.9.8.9", "REF-1", "order", "2026-10-31") != V._vol_pick("10.9.9.9", "REF-1", "order", "2026-10-31"))
+orig_ok = V._health_ok
+V._health_ok = lambda code: True
+for nid in (3, 4, 5):
+    V.db_exec("INSERT INTO nodes(id, token_hash, callsign, created, last_seen) VALUES(?,?,?,?,?)", (nid, "t%d" % nid, "vol-%d" % nid, now - 9999, int(time.time())))
+    V.db_exec("INSERT INTO refs(id, node_id, secret, ip, udp_ports, tcp_port, kind, asn, country, verified, created) VALUES(?,?,?,?,?,0,'ZZ',?,'ZZ',1,?)",
+              (nid, nid, "ab" * 16, "127.0.0.%d" % (nid + 1), json.dumps([pW]), 64500 + nid, now))
+V.db_exec("UPDATE nodes SET last_seen=? WHERE id IN (1, 2)", (int(time.time()),))
+runs = {tuple(c["code"] for c in V._community_for_browser("10.9.9.%d" % (i % 250 + 1), None, "XX")) for i in range(40)}
+check("из одной /24 сорок запросов подряд дают одни и те же два сервера (перебором весь список не собрать)", len(runs) == 1 and len(next(iter(runs))) == 2, runs)
+seen = set()
+for i in range(60):
+    seen |= {c["code"] for c in V._community_for_browser("10.%d.%d.1" % (i // 200, i % 200), None, "XX")}
+check("разные подсети получают разные серверы: нагрузка расходится по всем", len(seen) >= 4, seen)
+V._health_ok = orig_ok
+
+print("F. срок хранения записей серверов добровольцев")
+t = int(time.time())
+V.db_exec("UPDATE nodes SET last_seen=? WHERE id=3", (t - (V.REF_KEEP_DAYS + 1) * 86400,))
+V.db_exec("UPDATE nodes SET last_seen=? WHERE id=4", (t - (V.REF_KEEP_DAYS - 1) * 86400,))
+V.purge_old(t)
+left = {r[0] for r in V.db_exec("SELECT node_id FROM refs", many=True)}
+nodes_left = {r[0] for r in V.db_exec("SELECT id FROM nodes", many=True)}
+check("молчит дольше REF_KEEP_DAYS: запись с IP удалена, а за ней и сам узел без замеров", 3 not in left and 3 not in nodes_left, (left, nodes_left))
+check("молчит меньше срока и на связи: записи остаются", {1, 2, 4, 5} <= left and {1, 2, 4, 5} <= nodes_left, (left, nodes_left))
+
 print("ИТОГ:", "всё прошло" if not fails else "ошибок: %d" % fails)
 sys.exit(1 if fails else 0)

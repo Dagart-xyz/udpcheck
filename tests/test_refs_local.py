@@ -291,6 +291,8 @@ try:
     ent = [n for n in nl2["nodes"] if n["callsign"] == cfgC["callsign"]][0]
     check("в публичном списке про сервер нет хостинга (сети и организации), домашний узел остаётся с сетью",
           ent["asn"] is None and ent["org"] is None and all(n["role"] != "node" or "asn" in n for n in nl2["nodes"]), ent)
+    check("в публичном списке ни у кого нет города (сервер добровольца может стоять дома)",
+          all("city" not in n and "city_en" not in n for n in nl2["nodes"]), [n for n in nl2["nodes"] if "city" in n])
     check("у опорных серверов проекта в списке код, имя, страна и активность (без сети и хостинга)",
           all(set(a) == {"code", "name", "name_en", "country", "online", "checks", "ok"} for a in nl2["anchors"]), nl2["anchors"])
     st, ipr = N.http(HUB, "GET", "/api/v2/ip")
