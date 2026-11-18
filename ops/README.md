@@ -43,7 +43,11 @@
   udpcheck-probe, sysctl, journald), файл подкачки.
   Адрес хаба в `target.env` кандидата должен быть публичным (`UDPCHECK_HUB_URL=https://домен/udpcheck`), а не локальным `http://127.0.0.1:18080/...`,
   и в `/etc/hosts` не должно быть строки с доменом сайта (cloud-init при имени машины, совпадающем с доменом, пишет `127.0.1.1 домен`): иначе в режиме
-  ожидания опорный сервер отчитывается сам себе, и хаб его не видит. Таймер `udpcheck-role.timer` включать с `--now`.
+  ожидания опорный сервер отчитывается сам себе, и хаб его не видит. Если в данных cloud-init стоит `manage_etc_hosts: true`
+  (`cloud-init query userdata | grep manage_etc_hosts`; user-data целиком не выводить — там пароль и ключи провайдера),
+  правка самого `/etc/hosts` не переживёт перезагрузку: поправить шаблон
+  `/etc/cloud/templates/hosts.debian.tmpl` (строку `127.0.1.1 {{fqdn}} {{hostname}}` → `127.0.1.1 {{hostname}}`) и применить
+  `cloud-init single --name update_etc_hosts --frequency always`. Таймер `udpcheck-role.timer` включать с `--now`.
 - Переключатель: `udpcheck-failover` + `udpcheck-failover.service/.timer` (раз в минуту) на отдельном сервере. Настройки в `/etc/udpcheck-failover/`:
   `failover.env` (`CANDIDATES="КОД=адрес,..."` по приоритету, `DOMAIN`, `NTFY_TOPIC`, сроки `DOWN_AFTER=300`, `UP_AFTER=1800`, `READY_WAIT=900`),
   `porkbun.env` (ключ API регистратора для смены A-записей домена и www), `backup.env` (доступ к S3; пароль копий переключателю не нужен).

@@ -33,7 +33,8 @@ import urllib.error
 import urllib.request
 
 VERSION = "0.5"
-DEFAULT_HUB = "https://dagart.xyz"
+# Адреса хаба по умолчанию нет: --hub, переменная UDPCHECK_HUB или адрес, сохранённый в настройках при регистрации.
+# Так старая копия агента не уйдёт к чужому хабу, если прежний домен сменит владельца.
 UDP2 = struct.Struct("!4sBB8sI4s")      # magic ver flags taskid seq mac = 22 байта
 TCP2 = struct.Struct("!4sBB8s4sI")      # magic ver mode taskid mac kb   = 22 байта
 
@@ -78,7 +79,8 @@ MSG = {
         "warn_src": "ВНИМАНИЕ: UDP вышел с другого адреса, чем HTTPS (VPN или обход на роутере). Результат искажён.",
         "tunnel_hint": "Выключите прокси, VPN или туннель либо исключите из него адреса целей и повторите.",
         "hub_rejected": "Хаб не принял результат: %s %s",
-        "help_hub": "адрес хаба (по умолчанию %s)", "help_config": "путь к файлу настроек", "help_once": "один замер сейчас и выход",
+        "help_hub": "адрес хаба, например https://example.org (или переменная UDPCHECK_HUB)",
+        "no_hub": "Не задан адрес хаба: укажите --hub https://адрес-хаба или переменную UDPCHECK_HUB.", "help_config": "путь к файлу настроек", "help_once": "один замер сейчас и выход",
         "help_ref": "то же, что --role both",
         "help_role": "node: проверять свою сеть (по умолчанию); ref: только опорный сервер; both: и то и другое",
         "banner": "udpcheck-node v%s. %s", "banner_ref": "Работаю опорным сервером.", "banner_node": "Выключите VPN и обход блокировок, иначе вы проверите их, а не провайдера.",
@@ -112,7 +114,8 @@ MSG = {
         "warn_src": "WARNING: UDP left from a different address than HTTPS (VPN or a bypass on the router). The result is distorted.",
         "tunnel_hint": "Turn off the proxy, VPN or tunnel, or exclude the targets' addresses from it, and repeat.",
         "hub_rejected": "The hub did not accept the result: %s %s",
-        "help_hub": "hub address (default %s)", "help_config": "path to the settings file", "help_once": "one measurement now, then exit",
+        "help_hub": "hub address, for example https://example.org (or the UDPCHECK_HUB variable)",
+        "no_hub": "No hub address: pass --hub https://hub-address or set the UDPCHECK_HUB variable.", "help_config": "path to the settings file", "help_once": "one measurement now, then exit",
         "help_ref": "same as --role both",
         "help_role": "node: check your own network (default); ref: anchor server only; both: both",
         "banner": "udpcheck-node v%s. %s", "banner_ref": "Running as an anchor server.", "banner_node": "Turn off your VPN and bypass tools, otherwise you will check them instead of your provider.",
@@ -654,7 +657,7 @@ def main():
     except Exception:
         pass
     ap = argparse.ArgumentParser(description="udpcheck-node")
-    ap.add_argument("--hub", default=None, help=tr("help_hub") % DEFAULT_HUB)
+    ap.add_argument("--hub", default=None, help=tr("help_hub"))
     ap.add_argument("--config", default=None, help=tr("help_config"))
     ap.add_argument("--once", action="store_true", help=tr("help_once"))
     ap.add_argument("--ref", action="store_true", help=tr("help_ref"))
@@ -663,7 +666,10 @@ def main():
     role = "both" if (args.ref and args.role == "node") else args.role
     path = args.config or cfg_path()
     cfg = load_cfg(path)
-    hub = (args.hub or cfg.get("hub") or DEFAULT_HUB).rstrip("/")
+    hub = (args.hub or os.environ.get("UDPCHECK_HUB") or cfg.get("hub") or "").strip().rstrip("/")
+    if not hub:
+        say(tr("no_hub"))
+        return 2
     say(tr("banner") % (VERSION, tr("banner_ref") if role == "ref" else tr("banner_node")))
     if not cfg.get("token") or cfg.get("hub") != hub:
         cfg = register(hub, {}, path)

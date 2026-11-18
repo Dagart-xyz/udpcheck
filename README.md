@@ -1,7 +1,8 @@
 # UDPcheck
 
 UDPcheck shows whether your ISP drops inbound UDP from abroad, in which direction (your packets going out, or the replies coming back), and gives you evidence to show to your ISP's support.
-Running instance: https://dagart.xyz/en/ (English) and https://dagart.xyz (Russian). [Русская версия](README.ru.md)
+**The public service was shut down in 2026.** The code stays here: to run your own instance, see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
+[Русская версия](README.ru.md)
 
 ## How it works
 
@@ -13,7 +14,8 @@ Running instance: https://dagart.xyz/en/ (English) and https://dagart.xyz (Russi
 - **Site** (`siteparts/index.tpl.html` plus the texts in `siteparts/strings.py`; `python build_site.py` builds `site/` in Russian and `site/en/` in English):
   a browser check over WebRTC, a provider list with search, a journal and a ready-made text for your ISP's support.
 
-Details: [PROTOCOL.md](PROTOCOL.md). One-line node install: `curl -fsSL https://dagart.xyz/install-node.sh | sudo sh`.
+Details: [PROTOCOL.md](PROTOCOL.md). The agent and the installer have no default hub address: pass your hub with `--hub` or `UDPCHECK_HUB`
+(see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)).
 
 ## Principles
 
@@ -76,5 +78,5 @@ draldrean@protonmail.com
 The code is distributed under the **GNU AGPL-3.0-or-later** ([LICENSE](LICENSE)). Improve it and run your own copies; if you run a modified version as a service for other people, they are entitled to its source code
 (so a visitor can check that the copy does not send their data further than the site). More about what we take from visitors and how: [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
 
-The name "UDPcheck" and the domain dagart.xyz belong to the official instance: please give copies and modified versions another name (see [NOTICE](NOTICE)).
+The name "UDPcheck" belongs to the original project: please give copies and modified versions another name (see [NOTICE](NOTICE)).
 How to help: [CONTRIBUTING.md](CONTRIBUTING.md), conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Your own hub: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). Vulnerabilities: [SECURITY.md](SECURITY.md).

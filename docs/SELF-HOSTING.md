@@ -52,8 +52,10 @@
    `RuntimeDirectory` — папка `/run/udpcheck` в памяти: там хаб держит хэши разных браузеров за текущие сутки, чтобы перезапуск службы
    не обнулял их счёт (перезагрузку сервера она не переживает, на диск ничего не попадает). Без этих двух строк хаб работает, но после перезапуска
    набор браузеров за сутки начнётся заново.
-5. Сайт: `python build_site.py`, затем `site/` на сервер в `/var/www/udpcheck-site`. Подставьте свой домен вместо `dagart.xyz`:
-   в `udpcheck_node.py` (`DEFAULT_HUB`), `installer/install-node.sh.in` (`HUB=`), тексте `site/index.html`, `site/.well-known/security.txt`,
+5. Сайт: `python build_site.py`, затем `site/` на сервер в `/var/www/udpcheck-site`. Адреса хаба по умолчанию в коде нет: впишите свой
+   в `installer/install-node.sh.in` (`HUB="${UDPCHECK_HUB:-https://ваш-домен}"`, до сборки) — иначе команда установки с вашей страницы
+   потребует `UDPCHECK_HUB=https://ваш-домен` перед `sh`. Агент адрес хаба получает от установщика (`--hub` в службе) или из `--hub`/`UDPCHECK_HUB`
+   при ручном запуске. Подставьте свой домен вместо `dagart.xyz` в тексте `site/index.html`, `site/.well-known/security.txt`,
    и перед выкладкой замените `__BUILD__` в `index.html` меткой версии (`ops/deploy_site.sh` делает это сам).
 6. Веб-сервер: образец `Caddyfile.dagart` (замените домен). Хаб слушает только `127.0.0.1:18080`, наружу его выставляет Caddy.
    Важно оставить в Caddy `log { output discard }` в блоках сайтов и глобальный `log default` с `exclude http.log.access` и фильтром,
@@ -141,7 +143,7 @@ UDPCHECK_TARGET_TCP_PORT=8443
 - `ops/hardening/caddy-sandbox.conf` в `/etc/systemd/system/caddy.service.d/sandbox.conf`: Caddy может писать только в `/var/lib/caddy` и `/var/log/caddy` (оценка `systemd-analyze security` 8.8 → 1.6);
 - `ops/hardening/caddy-restart.conf` в `/etc/systemd/system/caddy.service.d/restart.conf`: если старт Caddy не уложился в тайм-аут (например, после нештатной перезагрузки сервер долго грузится) или Caddy упал, systemd запускает его снова через 10 секунд. Применение: `systemctl daemon-reload`, сам Caddy перезапускать не нужно;
 - запись CAA в DNS домена, чтобы сертификаты могли выпускать только центры, которыми пользуется Caddy: `0 issue "letsencrypt.org"`, `0 issue "sectigo.com"` (запасной ZeroSSL) и `0 issuewild ";"`;
-- `ops/udpcheck-hostcheck.py` с `udpcheck-hostcheck.service` и `.timer` (`/usr/local/sbin`, `/etc/systemd/system`) раз в 5 минут пишет `/run/udpcheck-host.json`: нужна ли перезагрузка, есть ли обновления безопасности, баны за час, адреса входов по SSH. Рабочий процесс передаёт это хабу в своём подписанном опросе, наблюдатель сообщает о перезагрузке старше 2 суток, обновлениях безопасности старше 3 суток, волне банов (60 в час) и входе по SSH с нового адреса (первые 24 часа адреса только запоминаются; в своём состоянии наблюдатель хранит их хэши);
+- `ops/udpcheck-hostcheck.py` с `udpcheck-hostcheck.service` и `.timer` (`/usr/local/sbin`, `/etc/systemd/system`) раз в 5 минут пишет `/run/udpcheck-host.json`: нужна ли перезагрузка, есть ли обновления безопасности, баны за час, адреса входов по SSH. Рабочий процесс передаёт это хабу в своём подписанном опросе, наблюдатель сообщает о перезагрузке старше 2 суток, обновлениях безопасности старше 3 суток, волне банов (60 в час) и входе по SSH с нового адреса (первые 24 часа адреса только запоминаются; в своём состоянии наблюдатель хранит их хэши). Если на сервере есть служебная учётка без оболочки, которая входит с меняющихся адресов, перечислите её в `UDPCHECK_SSH_QUIET_USERS` (имена через запятую, точное совпадение; root заглушить нельзя): `systemctl edit udpcheck-hostcheck.service` → `[Service]` / `Environment=UDPCHECK_SSH_QUIET_USERS=имя`. Ограничьте такую учётку в `sshd` (например, `ForceCommand`): тревоги о её входах больше не будет;
 - перед публикацией правок прогоняйте `tests/fuzz_local.py` (мусорные UDP- и HTTP-запросы) и остальные `tests/test_*_local.py`.
 Применяйте правила nftables с откатом по таймеру (`systemd-run --on-active=180 nft delete table inet udpcheck_guard`), пока не убедились, что доступ по SSH остался.
 

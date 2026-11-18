@@ -770,16 +770,20 @@ def health_report(now=None):
 
 # B. По принятым проверкам посетителей: сервер, который не ответил в большинстве последних проверок, хотя у тех же людей ответили другие серверы,
 #    и такие проверки пришли из нескольких разных сетей. Один провайдер, который режет UDP, сюда не попадёт: нужны разные сети (ASN).
+#    Несколько провайдеров, которые режут часть зарубежных адресов, тоже не попадут: если уже после первого провала в окне сервер ответил
+#    посетителям из VIS_OK_ASNS других сетей, он жив (случай PAR1-FR 04.11). У сломанного сервера ответы есть только до провалов.
 VIS_LAST = int(os.environ.get("UDPCHECK_VIS_LAST", "12"))        # сколько последних проверок на сервер смотрим (за сутки)
 VIS_MIN = int(os.environ.get("UDPCHECK_VIS_MIN", "6"))           # меньше проверок: судить рано
 VIS_SHARE = float(os.environ.get("UDPCHECK_VIS_SHARE", "0.7"))   # доля проверок без ответа
 VIS_ASNS = int(os.environ.get("UDPCHECK_VIS_ASNS", "3"))         # из скольких разных сетей
+VIS_OK_ASNS = int(os.environ.get("UDPCHECK_VIS_OK_ASNS", "2"))   # столько других сетей получили ответ между провалами: сервер жив, режут провайдеры (0 — не смотреть)
 _vis_cache = {"t": 0, "d": {}}
 
 
 def visitor_health(now=None):
-    """Код сервера -> {checks, failed, asns, unseen, lost, bad}. unseen: сервер не получил запросов посетителя (не дошли туда);
-    lost: сервер ответил, а браузер ответа не получил (не дошли обратно). Пересчёт раз в 5 минут."""
+    """Код сервера -> {checks, failed, asns, unseen, lost, ok_asns, bad}. unseen: сервер не получил запросов посетителя (не дошли туда);
+    lost: сервер ответил, а браузер ответа не получил (не дошли обратно); ok_asns: сколько сетей, где он не молчал, получили ответ
+    после первого провала в окне. Пересчёт раз в 5 минут."""
     now = time.time() if now is None else now
     if now - _vis_cache["t"] < 300:
         return _vis_cache["d"]
@@ -801,9 +805,12 @@ def visitor_health(now=None):
     for code, e in per.items():
         bad = [x for x in e if not x[1]]
         asns = {x[0] for x in bad if x[0]}
+        oldest = max((i for i, x in enumerate(e) if not x[1]), default=0)          # e идёт от новых к старым
+        ok_asns = {x[0] for x in e[:oldest] if x[1] and x[0]} - asns              # сети, где сервер то отвечал, то молчал, не довод
         out[code] = {"checks": len(e), "failed": len(bad), "asns": len(asns), "unseen": sum(1 for x in bad if x[2] == 0),
-                     "lost": sum(1 for x in bad if x[3] > 0),
-                     "bad": len(e) >= VIS_MIN and len(bad) >= VIS_SHARE * len(e) and len(asns) >= VIS_ASNS}
+                     "lost": sum(1 for x in bad if x[3] > 0), "ok_asns": len(ok_asns),
+                     "bad": len(e) >= VIS_MIN and len(bad) >= VIS_SHARE * len(e) and len(asns) >= VIS_ASNS
+                             and (VIS_OK_ASNS <= 0 or len(ok_asns) < VIS_OK_ASNS)}
     _vis_cache.update(t=now, d=out)
     return out
 

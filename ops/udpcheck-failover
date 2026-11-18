@@ -6,7 +6,8 @@
 Кандидаты перечислены по приоритету: CANDIDATES="AAA1-XX=192.0.2.10,BBB1-YY=198.51.100.20,CCC1-ZZ=203.0.113.30".
 Кто сейчас хаб, записано в S3 в control/active.json; этот файл пишет только переключатель, кандидаты читают его сами (ops/udpcheck-role).
 Каждую минуту:
-  1. Проверяет активный хаб: HTTPS на его адрес с именем домена, /api/v2/health должен ответить ok и db_ok.
+  1. Проверяет активный хаб: HTTPS на его адрес с именем домена, /api/v2/health должен ответить ok и db_ok
+     (отказ самого хаба по лимиту частоты, 429 с {"error": ...}, тоже значит «на месте»: переезжать с живого незачем).
   2. Вниз: активный не отвечает DOWN_AFTER секунд подряд, а сам переключатель при этом видит другие серверы (значит, дело не в нём) ->
      назначает следующего живого по приоритету (mode=takeover). Живой кандидат: отвечает по HTTPS с действующим сертификатом.
   3. Наверх: кандидат выше активного отвечает UP_AFTER секунд подряд, и с последнего переключения прошло не меньше UP_AFTER ->
@@ -183,13 +184,31 @@ class Net:
         return time.time()
 
 
-def hub_ok(net, ip):
+def _health(net, ip):
+    """(код, разобранное тело) ответа /api/v2/health; (None, {}) без соединения или с телом не JSON-объектом."""
     try:
         st, body = net.get(ip, "/api/v2/health")
         d = json.loads(body or b"{}")
-        return st == 200 and d.get("ok") is True and d.get("db_ok") is not False
+        return st, d if isinstance(d, dict) else {}
     except Exception:
-        return False
+        return None, {}
+
+
+def _is_hub(st, d):
+    return st == 200 and d.get("ok") is True and d.get("db_ok") is not False
+
+
+def hub_ok(net, ip):
+    return _is_hub(*_health(net, ip))
+
+
+def hub_answers(net, ip):
+    """Активный хаб на месте: отвечает как хаб (hub_ok) или сам отказывает по лимиту частоты. 429 с телом {"error": ...} пишет только
+    программа хаба, значит она жива и сеть до неё есть; переезжать с неё незачем (12.11.2026 такой отказ из-за сбитых часов хаба
+    был принят за молчание, и хаб ушёл с живого сервера). Пустой 429 замедлителя роботов сюда не относится. Для готовности нового хаба
+    перед переводом DNS по-прежнему нужен настоящий ответ (hub_ok). Один запрос, как и раньше."""
+    st, d = _health(net, ip)
+    return _is_hub(st, d) or (st == 429 and "error" in d)
 
 
 def alive(net, ip):
@@ -275,7 +294,7 @@ def step(net, conf, st):
         return assign(net, st, nxt[0], "takeover", active, now, "%s не поднялся за %d мин" % (active, ready_wait // 60))
 
     # активный хаб
-    if hub_ok(net, ips[active]):
+    if hub_answers(net, ips[active]):
         st.pop("down_since", None)
         if st.pop("down_alerted", None):
             net.notify("Хаб %s снова отвечает." % active)

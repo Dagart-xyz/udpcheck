@@ -30,15 +30,25 @@ def security_updates():
     return sum(1 for ln in out.splitlines() if ln.startswith("Inst ") and re.search(r"-security|Debian-Security|Ubuntu:[^ ]*/[^ ]*-security", ln))
 
 
+def quiet_users():
+    """Учётки, чьи входы не передаём наблюдателю: UDPCHECK_SSH_QUIET_USERS, имена через запятую или пробел, точное совпадение.
+    Для служебных учёток без оболочки, которые входят с меняющихся адресов:
+    иначе каждый новый адрес — тревога «вход с нового адреса». root заглушить нельзя."""
+    return {u for u in re.split(r"[\s,]+", os.environ.get("UDPCHECK_SSH_QUIET_USERS", "")) if u and u != "root"}
+
+
 def ssh_logins(window_min=12):
-    """Различные адреса успешных входов по ключу за последние минуты."""
+    """Различные адреса успешных входов за последние минуты (кроме учёток из quiet_users)."""
+    quiet = quiet_users()
     out = run(["journalctl", "-u", "ssh", "-u", "sshd", "--since", "-%dmin" % window_min, "--no-pager", "-o", "cat"])
     ips = []
     for ln in out.splitlines():
-        m = re.search(r"Accepted \w+ for \S+ from (\S+) port", ln)
+        m = re.search(r"Accepted \w+ for (\S+) from (\S+) port", ln)
         if m:
+            if m.group(1) in quiet:
+                continue
             try:
-                ip = str(ipaddress.ip_address(m.group(1)))
+                ip = str(ipaddress.ip_address(m.group(2)))
             except ValueError:
                 continue
             if ip not in ips:

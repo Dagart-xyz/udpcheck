@@ -1,12 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 UDPcheck authors
-# udpcheck-node: установщик узла сети проверок UDP (Linux с systemd). Источник: https://dagart.xyz
+# udpcheck-node: установщик узла сети проверок UDP (Linux с systemd). Адреса хаба по умолчанию нет: UDPCHECK_HUB или HUB= ниже.
 #
-#   Установка (одна строка для любого Linux и роутера OpenWrt, сама выберет curl или wget и sudo):
-#     (curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh
-#   Удаление:
-#     (curl -fsSL https://dagart.xyz/i 2>/dev/null || wget -qO- https://dagart.xyz/i) | sh -s -- uninstall
+#   Установка (одна строка для любого Linux и роутера OpenWrt, сама выберет curl или wget и sudo; https://адрес-хаба — ваш хаб):
+#     (curl -fsSL https://адрес-хаба/i 2>/dev/null || wget -qO- https://адрес-хаба/i) | UDPCHECK_HUB=https://адрес-хаба sh
+#   Удаление (адрес хаба не нужен):
+#     (curl -fsSL https://адрес-хаба/i 2>/dev/null || wget -qO- https://адрес-хаба/i) | sudo sh -s -- uninstall
 #
 # Что делает: ставит Python 3 (если нет), скачивает агент, проверяет SHA-256, создаёт службу udpcheck-node,
 # которая работает под временным пользователем без прав (systemd DynamicUser). Агент ходит наружу: на хаб по HTTPS
@@ -17,10 +17,13 @@
 # Фаервол, SSH и остальные службы установщик не затрагивает: порты для опорной роли вы открываете сами.
 set -eu
 
-HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
+# Адрес хаба. По умолчанию пусто: старая копия установщика не уйдёт к чужому хабу, если прежний домен сменит владельца.
+# Свой хаб: впишите его после «:-» (например, "${UDPCHECK_HUB:-https://example.org}") или задавайте UDPCHECK_HUB в команде.
+HUB="${UDPCHECK_HUB:-}"
+HUB="${HUB%/}"
 ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (проверяет свою сеть) | ref (опорный сервер) | both
 if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # старая переменная: REF=0 означало «только узел»
-AGENT_SHA256="f2913f66f5d2983a5367ae16b832f065cc069cba32c2882b21ef1a49c58843c9"
+AGENT_SHA256="0fb5340b5afa868a46014b4ac77872fb199765affc4408111ff227429a0f1bc8"
 DIR=/opt/udpcheck-node
 STATE=/var/lib/udpcheck-node
 SVC=udpcheck-node
@@ -28,6 +31,12 @@ UNIT="/etc/systemd/system/${SVC}.service"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'Ошибка: %s\n' "$*" >&2; exit 1; }
+
+# адрес хаба нужен для установки, для удаления — нет; в адресе только безопасные символы (он попадает в службу и в sed)
+if [ "${1:-install}" != uninstall ] || [ -n "$HUB" ]; then
+  [ -n "$HUB" ] || die "не задан адрес хаба. Укажите его перед sh: ... | UDPCHECK_HUB=https://адрес-хаба sh"
+  printf '%s\n' "$HUB" | grep -Eqx 'https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?' || die "неверный адрес хаба '$HUB' (нужен вид https://example.org)"
+fi
 
 # fetch URL ФАЙЛ [ТАЙМАУТ]: скачивает через curl, а если его нет, через wget (на чистом Debian curl может не быть)
 fetch() {
@@ -67,6 +76,7 @@ verify_sig() {
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
     say "Нужны права root: перезапускаю установщик через sudo..."
+    [ -n "$HUB" ] || die "для удаления без адреса хаба нужны права root: запустите через sudo sh (или войдите как root: su -)"
     SELF="$(mktemp)"
     fetch "$HUB/install-node.sh" "$SELF" 30 || die "не удалось повторно скачать установщик"
     exec sudo env UDPCHECK_YES="${UDPCHECK_YES:-0}" UDPCHECK_HUB="$HUB" UDPCHECK_ROLE="$ROLE" UDPCHECK_OPEN_FW="${UDPCHECK_OPEN_FW:-}" sh -c 'f="$1"; shift; sh "$f" "$@"; r=$?; rm -f "$f"; exit $r' _ "$SELF" "$@"
@@ -286,7 +296,7 @@ USE_PROCD=1
 
 start_service() {
 	procd_open_instance
-	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --config /etc/udpcheck-node/config.json
+	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --hub HUB_ADDR --config /etc/udpcheck-node/config.json
 	procd_set_param user nobody
 	procd_set_param env UDPCHECK_LANG=ru
 	procd_set_param no_new_privs 1
@@ -297,7 +307,8 @@ start_service() {
 }
 INITEOF
   chmod 755 /etc/init.d/udpcheck-node
-  if [ "$ROLE" != node ]; then sed -i "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" /etc/init.d/udpcheck-node; fi
+  sed -i "s|--hub HUB_ADDR|--hub $HUB|" /etc/init.d/udpcheck-node
+  if [ "$ROLE" != node ]; then sed -i "s|udpcheck_node.py --hub|udpcheck_node.py --role $ROLE --hub|" /etc/init.d/udpcheck-node; fi
   /etc/init.d/udpcheck-node enable
   /etc/init.d/udpcheck-node restart
   say "Служба запущена, жду регистрацию узла..."
@@ -422,7 +433,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --config /var/lib/udpcheck-node/config.json
+ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --hub HUB_ADDR --config /var/lib/udpcheck-node/config.json
 Environment=UDPCHECK_LANG=ru
 # Временный пользователь без прав; состояние (токен узла) только в /var/lib/udpcheck-node.
 DynamicUser=yes
@@ -449,8 +460,9 @@ RestartSec=20
 WantedBy=multi-user.target
 UNITEOF
 chmod 644 "$UNIT"
+sed -i "s|--hub HUB_ADDR|--hub $HUB|" "$UNIT"
 if [ "$ROLE" != node ]; then
-  sed -i -e "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" -e 's|^TasksMax=16|TasksMax=40|' "$UNIT"
+  sed -i -e "s|udpcheck_node.py --hub|udpcheck_node.py --role $ROLE --hub|" -e 's|^TasksMax=16|TasksMax=40|' "$UNIT"
 fi
 
 systemctl daemon-reload

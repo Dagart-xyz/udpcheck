@@ -5,12 +5,12 @@
 (комментарии на русском в английской версии удаляются, заголовок заменяется английским). Выбор языка вывода агента задаётся переменной UDPCHECK_LANG в службе."""
 import re
 
-EN_HEADER = """# udpcheck-node: installer of a node for the UDP check network (Linux with systemd, OpenWrt). Source: https://dagart.xyz/en/
+EN_HEADER = """# udpcheck-node: installer of a node for the UDP check network (Linux with systemd, OpenWrt). No default hub address: UDPCHECK_HUB or HUB= below.
 #
-#   Install (one line for any Linux and OpenWrt router; it picks curl or wget and sudo itself):
-#     (curl -fsSL https://dagart.xyz/en/i 2>/dev/null || wget -qO- https://dagart.xyz/en/i) | sh
-#   Remove:
-#     (curl -fsSL https://dagart.xyz/en/i 2>/dev/null || wget -qO- https://dagart.xyz/en/i) | sh -s -- uninstall
+#   Install (one line for any Linux and OpenWrt router; it picks curl or wget and sudo itself; https://hub-address is your hub):
+#     (curl -fsSL https://hub-address/en/i 2>/dev/null || wget -qO- https://hub-address/en/i) | UDPCHECK_HUB=https://hub-address sh
+#   Remove (no hub address needed):
+#     (curl -fsSL https://hub-address/en/i 2>/dev/null || wget -qO- https://hub-address/en/i) | sudo sh -s -- uninstall
 #
 # What it does: installs Python 3 (if missing), downloads the agent, verifies its SHA-256 and signature, creates the udpcheck-node service
 # that runs as a temporary unprivileged user (systemd DynamicUser). The agent only makes outgoing connections: to the hub over HTTPS
@@ -23,6 +23,11 @@ EN_HEADER = """# udpcheck-node: installer of a node for the UDP check network (L
 
 PAIRS = [
     ("printf 'Ошибка: %s\\n'", "printf 'Error: %s\\n'"),
+    ("не задан адрес хаба. Укажите его перед sh: ... | UDPCHECK_HUB=https://адрес-хаба sh",
+     "no hub address. Put it before sh: ... | UDPCHECK_HUB=https://hub-address sh"),
+    ("неверный адрес хаба '$HUB' (нужен вид https://example.org)", "invalid hub address '$HUB' (expected the form https://example.org)"),
+    ("для удаления без адреса хаба нужны права root: запустите через sudo sh (или войдите как root: su -)",
+     "removal without a hub address needs root rights: run it through sudo sh (or log in as root: su -)"),
     ("# auto | node (проверяет свою сеть) | ref (опорный сервер) | both", "# auto | node (checks its own network) | ref (anchor server) | both"),
     ("# старая переменная: REF=0 означало «только узел»", "# old variable: REF=0 meant \"node only\""),
     ("Подпись агента не проверена (нет openssl с Ed25519): проверена только контрольная сумма.", "The agent signature was not verified (no openssl with Ed25519): only the checksum was verified."),

@@ -4,8 +4,10 @@
 """udpcheck-tg-relay: пересылка оповещений из ntfy в Telegram. Работает там, откуда Telegram доступен, раз в минуту по таймеру.
 
 Если Telegram недоступен с сервера, где работают наблюдатель или переключатель, они шлют оповещения в свой топик ntfy. Эта служба забирает
-новые сообщения топика (запрос ntfy с poll=1 и since=<id последнего пересланного>) и отправляет их в Telegram. Входящие порты не нужны.
-Пересланным считается только то, что Telegram принял: при ошибке то же сообщение уйдёт в следующую минуту.
+новые сообщения топика (запрос ntfy с poll=1 и since=<метка времени> с запасом назад) и отправляет их в Telegram. Входящие порты не нужны.
+Пересланным считается только то, что Telegram принял: при ошибке то же сообщение уйдёт в следующую минуту. Номера пересланных помним,
+поэтому запас назад повторов не даёт. since=<id> не годится: ntfy.sh отдаёт по нему и соседей по той же секунде, уже пересланных
+(02.11.2026 из-за этого два напоминания шли в Telegram по кругу раз в минуту), а свежее сообщение показывает не сразу.
 Настройки: файл с NTFY_TOPIC, TG_TOKEN, TG_CHAT (тот же /etc/udpcheck-watch.env, через LoadCredential relay.env).
 Команды: run (шаг по таймеру), status.
 """
@@ -19,7 +21,8 @@ import urllib.request
 CONF_PATHS = (os.path.join(os.environ.get("CREDENTIALS_DIRECTORY", ""), "relay.env"), "/etc/udpcheck-watch.env")
 STATE = os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/udpcheck-tg-relay"), "state.json")
 NTFY = os.environ.get("NTFY_BASE", "https://ntfy.sh")
-FIRST_SINCE = "10m"          # первый запуск: не пересылать старую историю топика, только последние минуты
+FIRST_SINCE = 600            # первый запуск: не пересылать старую историю топика, только последние 10 минут
+OVERLAP = 120                # запас назад при запросе: ntfy показывает свежее сообщение не сразу
 MAX_PER_RUN = 20
 
 
@@ -70,25 +73,37 @@ def step(conf, st, fetch_fn=fetch, send_fn=send_tg, now=None):
     topic, token, chat = conf.get("NTFY_TOPIC", ""), conf.get("TG_TOKEN", ""), conf.get("TG_CHAT", "")
     if not (topic and token and chat):
         return "не настроено: нужны NTFY_TOPIC, TG_TOKEN и TG_CHAT"
+    # st["t"]: всё, что старше, переслано (время ntfy). Отметка двигается только по пересланным сообщениям, поэтому
+    # сообщение, которое Telegram долго не принимает, не выпадет из окна. Состояние старой версии: {"last": id или метка времени}.
+    t = st.get("t")
+    if not isinstance(t, int):
+        last = str(st.get("last") or "")
+        t = int(last) if last.isdigit() else int(time.time() if now is None else now) - FIRST_SINCE
+    seen = st.get("seen") if isinstance(st.get("seen"), dict) else {}
     try:
-        events = fetch_fn(topic, st.get("last") or FIRST_SINCE)
+        events = fetch_fn(topic, str(max(0, t - OVERLAP)))
     except Exception as e:
         return "ntfy недоступен: %s" % e.__class__.__name__
+    st.pop("last", None)
+    st["t"], st["seen"] = t, seen
+    fresh = sorted((ev for ev in events if ev["id"] not in seen), key=lambda ev: int(ev.get("time") or t))
     sent = 0
-    for ev in events[:MAX_PER_RUN]:
+    result = None
+    for ev in fresh[:MAX_PER_RUN]:
         text = ev.get("message") or ""
         try:
             ok = send_fn(token, chat, text)
         except Exception:
             ok = False
         if not ok:
-            return "переслано %d, Telegram не принял: повторю в следующий раз" % sent
-        st["last"] = ev["id"]
+            result = "переслано %d, Telegram не принял: повторю в следующий раз" % sent
+            break
+        seen[ev["id"]] = int(ev.get("time") or t)
+        st["t"] = max(st["t"], seen[ev["id"]])
         sent += 1
-    if not events and not st.get("last"):
-        # дальше читаем с этого момента (метка времени, а не «последние 10 минут»: сообщение, которое Telegram долго не принимает, не выпадет из окна)
-        st["last"] = str(int(time.time() if now is None else now))
-    return "переслано %d" % sent
+    for k in [k for k, v in seen.items() if v < st["t"] - OVERLAP]:
+        del seen[k]                # старше следующего запроса: ntfy их больше не отдаст
+    return result or "переслано %d" % sent
 
 
 def load_state():

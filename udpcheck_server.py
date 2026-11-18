@@ -327,7 +327,10 @@ class Geo:
 
 # ---------------------------------------------------------------- утилиты
 class RateLimiter:
-    """Скользящее окно: не больше `limit` событий за `window` секунд на ключ."""
+    """Скользящее окно: не больше `limit` событий за `window` секунд на ключ.
+    Время по time.monotonic(), а не по часам: 12.11.2026 часы виртуальной машины хаба на 4 минуты ушли вперёд на полчаса, отметки «из будущего»
+    встали в голову очереди и перестали выпускать из окна остальные, адрес наблюдателя упёрся в лимит (429), и переключатель увёл хаб с живого сервера.
+    `now`, если передан, должен быть из того же источника (time.monotonic())."""
 
     def __init__(self, limit, window):
         self.limit = limit
@@ -335,7 +338,7 @@ class RateLimiter:
         self.hits = {}
 
     def allow(self, key, now=None):
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         q = self.hits.setdefault(key, deque())
         while q and q[0] <= now - self.window:
             q.popleft()
@@ -346,7 +349,7 @@ class RateLimiter:
 
     def over(self, key, now=None):
         """Исчерпан ли лимит по ключу (без учёта нового события)."""
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         q = self.hits.get(key)
         if not q:
             return False
@@ -355,7 +358,7 @@ class RateLimiter:
         return len(q) >= self.limit
 
     def purge(self, now=None):
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         for key in [k for k, q in self.hits.items() if not q or q[-1] <= now - self.window]:
             del self.hits[key]
 
@@ -719,9 +722,8 @@ class Handler(BaseHTTPRequestHandler):
 def janitor():
     while True:
         time.sleep(30)
-        now = time.time()
-        rl_stun.purge(now)
-        rl_pad.purge(now)
+        rl_stun.purge()                # по своим (монотонным) часам
+        rl_pad.purge()
         GEO.reload()
         if V2 is not None:
             try:

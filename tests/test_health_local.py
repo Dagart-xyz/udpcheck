@@ -186,6 +186,18 @@ for i in range(14):
 # сервер добровольца: мало проверок, судить рано
 for i in range(3):
     web(65300 + i, [r("AAA", 3), r("REF-1", 0)], ago=400 + i)
+# случай PAR1-FR 04.11: DDD молчит у 4 сетей (их провайдеры режут часть зарубежных адресов), но между провалами отвечает посетителям
+# из двух других сетей: сервер жив. От новых к старым: П П У П У П П П П П П П (П — провал, У — ответ)
+for i, (asn, ok) in enumerate([(65500, 0), (65501, 0), (65600, 3), (65502, 0), (65601, 3), (65503, 0),
+                               (65500, 0), (65501, 0), (65502, 0), (65503, 0), (65500, 0), (65501, 0)]):
+    web(asn, [r("AAA", 3), r("DDD", ok, 0, 0)], ago=600 + i)
+# EEE сломался: ответы у трёх сетей были, но все раньше провалов — это настоящая поломка, тревога нужна
+for i in range(12):
+    web(65700 + i % 4 if i < 9 else 65800 + i, [r("AAA", 3), r("EEE", 0 if i < 9 else 3, 0, 0)], ago=700 + i)
+# FFF: между провалами отвечал только тем же сетям, у которых и молчал (то ответ, то нет) — это не довод, что сервер жив
+for i, (asn, ok) in enumerate([(65900, 0), (65901, 3), (65902, 0), (65903, 0), (65900, 3), (65901, 0),
+                               (65902, 0), (65903, 0), (65900, 0), (65901, 0)]):
+    web(asn, [r("AAA", 3), r("FFF", ok, 0, 0)], ago=800 + i)
 V._vis_cache["t"] = 0
 vh = V.visitor_health()
 b = vh.get("BBB", {})
@@ -195,6 +207,21 @@ check("сервер, молчащий только у одной сети (пр�
 check("проверки, где не ответил никто, не считаются", vh.get("BBB", {}).get("checks") == 8 and vh.get("AAA", {}).get("failed") == 0, (vh.get("BBB"), vh.get("AAA")))
 check("мало проверок: судить рано", vh.get("REF-1", {}).get("bad") is False and vh["REF-1"]["checks"] == 3, vh.get("REF-1"))
 check("берём только последние VIS_LAST проверок сервера", vh.get("AAA", {}).get("checks") == V.VIS_LAST, vh.get("AAA"))
+d = vh.get("DDD", {})
+check("молчит у 4 сетей, но между провалами отвечал двум другим сетям: фильтр у провайдеров, не помечен",
+      d.get("bad") is False and d.get("failed") == 10 and d.get("asns") == 4 and d.get("ok_asns") == 2, d)
+e = vh.get("EEE", {})
+check("ответы были только до провалов (сервер сломался): помечен", e.get("bad") is True and e.get("failed") == 9 and e.get("ok_asns") == 0, e)
+f = vh.get("FFF", {})
+check("между провалами отвечал только тем же сетям, где молчал: помечен", f.get("bad") is True and f.get("ok_asns") == 0, f)
+check("у сервера без ответов вовсе других сетей с ответом нет", b.get("ok_asns") == 0, b)
+V.VIS_OK_ASNS, keep = 0, V.VIS_OK_ASNS
+V._vis_cache["t"] = 0
+check("UDPCHECK_VIS_OK_ASNS=0 выключает поправку (правило как раньше), а не тревогу", V.visitor_health().get("DDD", {}).get("bad") is True
+      and V.visitor_health().get("BBB", {}).get("bad") is True, V.visitor_health().get("DDD"))
+V.VIS_OK_ASNS = keep
+V._vis_cache["t"] = 0
+vh = V.visitor_health()
 # старше суток не смотрим
 V.db_exec("UPDATE webchecks SET ts = ts - 90000")
 V._vis_cache["t"] = 0

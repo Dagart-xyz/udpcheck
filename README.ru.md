@@ -1,7 +1,7 @@
 # UDPcheck
 
 Сервис, который показывает, режет ли ваш интернет-провайдер входящий UDP из-за рубежа, в какую сторону, и даёт доказательства для техподдержки.
-Рабочая версия: https://dagart.xyz (на русском) и https://dagart.xyz/en/ (на английском)
+**Публичный сервис закрыт в 2026 году.** Код остаётся здесь: свой экземпляр — по [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 
 [English version](README.md)
 
@@ -14,7 +14,8 @@
   присылает хабу итог. Роль «опорный сервер участника» (`--role ref`) отвечает чужим проверкам.
 - **Страница** (`siteparts/index.tpl.html` и тексты в `siteparts/strings.py`, собирается `python build_site.py` в `site/` на русском и в `site/en/` на английском): браузерная проверка через WebRTC, список провайдеров с поиском, журнал, текст обращения в техподдержку.
 
-Подробно: [PROTOCOL.md](PROTOCOL.md). Установка узла одной командой: `curl -fsSL https://dagart.xyz/install-node.sh | sudo sh`.
+Подробно: [PROTOCOL.md](PROTOCOL.md). Адреса хаба по умолчанию в агенте и установщике нет: укажите свой через `--hub` или `UDPCHECK_HUB`
+(см. [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md)).
 
 ## Принципы
 
@@ -79,5 +80,5 @@ draldrean@protonmail.com
 изменённую версию как сервис для других людей, они вправе получить её исходный код (так посетитель может проверить, что копия не отправляет
 его данные дальше сайта). Подробнее о том, что и как мы берём у посетителей: [PRIVACY-PRINCIPLES.md](PRIVACY-PRINCIPLES.md).
 
-Название «UDPcheck» и домен dagart.xyz относятся к официальному экземпляру: копиям и изменённым версиям просим давать другое имя
+Название «UDPcheck» относится к исходному проекту: копиям и изменённым версиям просим давать другое имя
 (см. [NOTICE](NOTICE)). Как помочь: [CONTRIBUTING.md](CONTRIBUTING.md), правила общения: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Свой хаб: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). Об уязвимостях: [SECURITY.md](SECURITY.md).

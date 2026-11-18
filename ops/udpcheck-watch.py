@@ -30,6 +30,7 @@ STATE = os.environ.get("WATCH_STATE") or os.path.join(os.environ.get("STATE_DIRE
 QUIET_FROM, QUIET_TO = int(os.environ.get("QUIET_FROM", "23")), int(os.environ.get("QUIET_TO", "8"))     # по Москве
 QUIET_CRITICAL = os.environ.get("QUIET_CRITICAL", "0") == "1"      # 1: падение хаба будит и ночью
 FAILS_HUB, FAILS_ANCHOR = 3, 5                                      # сколько минут подряд, прежде чем сообщить
+FAILS_LIMITED = 10                                                  # хаб отказывает по лимиту частоты (429): сам жив, ждём дольше
 REMIND = 6 * 3600
 EXPIRY = [x.strip() for x in os.environ.get("WATCH_EXPIRY", "").split(",") if "=" in x]     # "Имя сервера=2026-11-05,Другой=2026-10-13": когда кончается аренда
 EXPIRY_HOUR = int(os.environ.get("EXPIRY_HOUR", "10"))                # во сколько по Москве напоминать
@@ -406,19 +407,35 @@ def site_digest(st):
         st["site_day"] = day
 
 
+def hub_limited(e):
+    """Отказ самой программы хаба по лимиту частоты (429 с телом {"error": ...}): хаб жив и сеть до него есть, но данных он сейчас не даёт.
+    Пустой 429 замедлителя роботов и любые другие ошибки сюда не относятся."""
+    if not isinstance(e, urllib.error.HTTPError) or e.code != 429:
+        return False
+    try:
+        d = json.loads(e.read(65536) or b"{}")
+    except Exception:
+        return False
+    return isinstance(d, dict) and "error" in d
+
+
 def run():
     st = load()
     st.setdefault("checks", {})
     st.setdefault("queue", [])
     nodes = health = None
+    limited = False
     try:
         nodes = http("/api/v2/nodes")
         health = http("/api/v2/health", headers={"X-Beat": BEAT_SECRET} if BEAT_SECRET else None)
-    except Exception:
-        pass
-    hub_bad = nodes is None or health is None or not health.get("ok")
+    except Exception as e:
+        limited = hub_limited(e)
+    # 12.11.2026 хаб из-за сбитых часов отказывал наблюдателю по лимиту, и тот писал «не отвечает», хотя хаб был жив: теперь это отдельная тревога
+    hub_bad = not limited and (nodes is None or health is None or not health.get("ok"))
     check(st, "hub", hub_bad, FAILS_HUB, "хаб dagart.xyz не отвечает уже %d мин." % FAILS_HUB, "хаб dagart.xyz отвечает", critical=True)
-    if not hub_bad:
+    check(st, "hub_limited", limited, FAILS_LIMITED, "хаб отказывает наблюдателю по лимиту частоты (429) уже %d мин.: сам хаб отвечает, но данные о серверах, "
+          "копиях, месте и памяти не обновляются." % FAILS_LIMITED, "хаб снова отдаёт наблюдателю данные")
+    if not hub_bad and not limited:
         if BEAT_SECRET:
             try:
                 http("/api/v2/health/beat", "POST", {"X-Beat": BEAT_SECRET})

@@ -1,12 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 UDPcheck authors
-# udpcheck-node: installer of a node for the UDP check network (Linux with systemd, OpenWrt). Source: https://dagart.xyz/en/
+# udpcheck-node: installer of a node for the UDP check network (Linux with systemd, OpenWrt). No default hub address: UDPCHECK_HUB or HUB= below.
 #
-#   Install (one line for any Linux and OpenWrt router; it picks curl or wget and sudo itself):
-#     (curl -fsSL https://dagart.xyz/en/i 2>/dev/null || wget -qO- https://dagart.xyz/en/i) | sh
-#   Remove:
-#     (curl -fsSL https://dagart.xyz/en/i 2>/dev/null || wget -qO- https://dagart.xyz/en/i) | sh -s -- uninstall
+#   Install (one line for any Linux and OpenWrt router; it picks curl or wget and sudo itself; https://hub-address is your hub):
+#     (curl -fsSL https://hub-address/en/i 2>/dev/null || wget -qO- https://hub-address/en/i) | UDPCHECK_HUB=https://hub-address sh
+#   Remove (no hub address needed):
+#     (curl -fsSL https://hub-address/en/i 2>/dev/null || wget -qO- https://hub-address/en/i) | sudo sh -s -- uninstall
 #
 # What it does: installs Python 3 (if missing), downloads the agent, verifies its SHA-256 and signature, creates the udpcheck-node service
 # that runs as a temporary unprivileged user (systemd DynamicUser). The agent only makes outgoing connections: to the hub over HTTPS
@@ -17,10 +17,11 @@
 # The installer does not touch the firewall, SSH or other services: you open the ports for the anchor role yourself.
 set -eu
 
-HUB="${UDPCHECK_HUB:-https://dagart.xyz}"
+HUB="${UDPCHECK_HUB:-}"
+HUB="${HUB%/}"
 ROLE="${UDPCHECK_ROLE:-auto}"   # auto | node (checks its own network) | ref (anchor server) | both
 if [ "${UDPCHECK_REF:-}" = 0 ] && [ "$ROLE" = auto ]; then ROLE=node; fi      # old variable: REF=0 meant "node only"
-AGENT_SHA256="f2913f66f5d2983a5367ae16b832f065cc069cba32c2882b21ef1a49c58843c9"
+AGENT_SHA256="0fb5340b5afa868a46014b4ac77872fb199765affc4408111ff227429a0f1bc8"
 DIR=/opt/udpcheck-node
 STATE=/var/lib/udpcheck-node
 SVC=udpcheck-node
@@ -28,6 +29,11 @@ UNIT="/etc/systemd/system/${SVC}.service"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+if [ "${1:-install}" != uninstall ] || [ -n "$HUB" ]; then
+  [ -n "$HUB" ] || die "no hub address. Put it before sh: ... | UDPCHECK_HUB=https://hub-address sh"
+  printf '%s\n' "$HUB" | grep -Eqx 'https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?' || die "invalid hub address '$HUB' (expected the form https://example.org)"
+fi
 
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -63,6 +69,7 @@ verify_sig() {
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
     say "Root rights are needed: restarting the installer through sudo..."
+    [ -n "$HUB" ] || die "removal without a hub address needs root rights: run it through sudo sh (or log in as root: su -)"
     SELF="$(mktemp)"
     fetch "$HUB/install-node.en.sh" "$SELF" 30 || die "could not download the installer again"
     exec sudo env UDPCHECK_YES="${UDPCHECK_YES:-0}" UDPCHECK_HUB="$HUB" UDPCHECK_ROLE="$ROLE" UDPCHECK_OPEN_FW="${UDPCHECK_OPEN_FW:-}" sh -c 'f="$1"; shift; sh "$f" "$@"; r=$?; rm -f "$f"; exit $r' _ "$SELF" "$@"
@@ -271,7 +278,7 @@ USE_PROCD=1
 
 start_service() {
 	procd_open_instance
-	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --config /etc/udpcheck-node/config.json
+	procd_set_param command /usr/bin/python3 /opt/udpcheck-node/udpcheck_node.py --hub HUB_ADDR --config /etc/udpcheck-node/config.json
 	procd_set_param user nobody
 	procd_set_param env UDPCHECK_LANG=en
 	procd_set_param no_new_privs 1
@@ -282,7 +289,8 @@ start_service() {
 }
 INITEOF
   chmod 755 /etc/init.d/udpcheck-node
-  if [ "$ROLE" != node ]; then sed -i "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" /etc/init.d/udpcheck-node; fi
+  sed -i "s|--hub HUB_ADDR|--hub $HUB|" /etc/init.d/udpcheck-node
+  if [ "$ROLE" != node ]; then sed -i "s|udpcheck_node.py --hub|udpcheck_node.py --role $ROLE --hub|" /etc/init.d/udpcheck-node; fi
   /etc/init.d/udpcheck-node enable
   /etc/init.d/udpcheck-node restart
   say "Service started, waiting for the node to register..."
@@ -406,7 +414,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --config /var/lib/udpcheck-node/config.json
+ExecStart=/usr/bin/env python3 /opt/udpcheck-node/udpcheck_node.py --hub HUB_ADDR --config /var/lib/udpcheck-node/config.json
 Environment=UDPCHECK_LANG=en
 DynamicUser=yes
 StateDirectory=udpcheck-node
@@ -432,8 +440,9 @@ RestartSec=20
 WantedBy=multi-user.target
 UNITEOF
 chmod 644 "$UNIT"
+sed -i "s|--hub HUB_ADDR|--hub $HUB|" "$UNIT"
 if [ "$ROLE" != node ]; then
-  sed -i -e "s|udpcheck_node.py --config|udpcheck_node.py --role $ROLE --config|" -e 's|^TasksMax=16|TasksMax=40|' "$UNIT"
+  sed -i -e "s|udpcheck_node.py --hub|udpcheck_node.py --role $ROLE --hub|" -e 's|^TasksMax=16|TasksMax=40|' "$UNIT"
 fi
 
 systemctl daemon-reload
